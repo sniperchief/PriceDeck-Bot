@@ -62,8 +62,34 @@ app = FastAPI(
 COMMODITIES_CACHE = []
 MARKETS_CACHE = []
 
+# Message deduplication - prevents processing the same message twice
+# Key: message_id, Value: timestamp when processed
+processed_message_ids = {}
+MAX_PROCESSED_CACHE = 1000  # Keep last 1000 message IDs
+
 # Background task reference
 alert_checker_task = None
+
+
+def is_message_processed(message_id: str) -> bool:
+    """
+    Check if a message was already processed.
+    Also cleans up old entries if cache gets too large.
+    """
+    global processed_message_ids
+
+    # Clean up if cache is too large (keep most recent half)
+    if len(processed_message_ids) > MAX_PROCESSED_CACHE:
+        sorted_items = sorted(processed_message_ids.items(), key=lambda x: x[1])
+        processed_message_ids = dict(sorted_items[MAX_PROCESSED_CACHE // 2:])
+
+    # Check if already processed
+    if message_id in processed_message_ids:
+        return True
+
+    # Mark as processed
+    processed_message_ids[message_id] = datetime.now().timestamp()
+    return False
 
 
 @app.on_event("startup")
@@ -173,6 +199,11 @@ async def receive_message(request: Request):
                     from_number = message.get("from")
                     message_id = message.get("id")
                     message_type = message.get("type")
+
+                    # DEDUPLICATION CHECK: Skip if already processed
+                    if is_message_processed(message_id):
+                        logger.info(f"Skipping duplicate message: {message_id}")
+                        continue
 
                     # Mark message as read immediately (shows blue ticks)
                     await mark_message_as_read(message_id)
