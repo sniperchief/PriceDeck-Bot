@@ -34,6 +34,7 @@ from app.database import (
     is_user_contributor,
     get_cart_items,
     remove_cart_item,
+    update_cart_item_quantity,
     is_vendor,
     get_order_by_id,
     update_order_status,
@@ -253,7 +254,11 @@ async def receive_message(request: Request):
                             parts = data.split("|")
                             if len(parts) >= 5:
                                 await send_cart_item_confirmation(from_number, parts[0], parts[1], parts[2], parts[3], parts[4])
-                        elif response_text.startswith("__VIEW_CART__"):
+                        elif "__VIEW_CART__" in response_text:
+                            # Send any message before the marker, then show cart
+                            message_part = response_text.replace("__VIEW_CART__", "").strip()
+                            if message_part:
+                                await send_whatsapp_message(from_number, message_part)
                             await send_cart_summary(from_number)
                         elif response_text == "__CHECKOUT_PHONE__":
                             await send_phone_selection_buttons(from_number)
@@ -298,6 +303,45 @@ async def receive_message(request: Request):
                                 else:
                                     await send_whatsapp_message(from_number, "Couldn't remove item. Try again.")
                                     await send_cart_summary(from_number)
+
+                            # Check if it's a quantity change request
+                            elif selected_id.startswith("change_qty_"):
+                                commodity = selected_id.replace("change_qty_", "")
+                                # Store which item we're changing quantity for
+                                partial_cart[from_number] = partial_cart.get(from_number, {})
+                                partial_cart[from_number]["editing_commodity"] = commodity
+                                partial_cart[from_number]["awaiting"] = "new_quantity"
+                                commodity_display = commodity.replace("_", " ").title()
+                                await send_whatsapp_message(from_number, f"Enter new quantity for {commodity_display} (minimum 1):")
+
+                            # Check if it's a delivery area selection
+                            elif selected_id == "area_not_listed":
+                                await send_whatsapp_message(
+                                    from_number,
+                                    "Sorry, we currently only deliver to the listed areas.\n\n"
+                                    "We're expanding soon! 🚀\n\n"
+                                    "Your cart is saved - you can checkout when we reach your area."
+                                )
+                                await send_main_menu(from_number, welcome=False)
+
+                            elif selected_id in ["new_haven", "ogui_road", "independence_layout", "trans_ekulu", "gra", "presidential_road", "golf", "okpara_avenue", "agbani_road"]:
+                                # User selected a delivery area
+                                area_names = {
+                                    "new_haven": "New Haven",
+                                    "ogui_road": "Ogui Road",
+                                    "independence_layout": "Independence Layout",
+                                    "trans_ekulu": "Trans Ekulu",
+                                    "gra": "GRA",
+                                    "presidential_road": "Presidential Road",
+                                    "golf": "Golf",
+                                    "okpara_avenue": "Okpara Avenue",
+                                    "agbani_road": "Agbani Road"
+                                }
+                                partial_cart[from_number] = partial_cart.get(from_number, {})
+                                partial_cart[from_number]["delivery_area"] = selected_id
+                                partial_cart[from_number]["awaiting"] = "delivery_address"
+                                area_name = area_names.get(selected_id, selected_id)
+                                await send_whatsapp_message(from_number, f"Enter your delivery address in {area_name}\n\n(e.g., street name, house number, landmark):")
 
                             # Check if it's a unit selection
                             elif selected_id in ["paint", "half_paint", "cup", "bag", "half_bag", "mudu", "kg", "piece", "other_unit"]:
@@ -390,13 +434,22 @@ async def receive_message(request: Request):
                                     )
                                     await send_main_menu(from_number, welcome=False)
                                 else:
-                                    response_text = await handle_checkout_start(from_number)
-                                    if "__AFTER_ACTION__" in response_text:
-                                        message_part = response_text.replace("__AFTER_ACTION__", "").strip()
-                                        await send_whatsapp_message(from_number, message_part)
+                                    # Check if cart has items
+                                    cart_items = get_cart_items(from_number)
+                                    if not cart_items:
+                                        await send_whatsapp_message(from_number, "Your cart is empty! Check prices to add items.")
                                         await send_main_menu(from_number, welcome=False)
                                     else:
-                                        await send_whatsapp_message(from_number, response_text)
+                                        # Check if we already have delivery info saved (for returning from edit)
+                                        partial = partial_cart.get(from_number, {})
+                                        if partial.get("delivery_address") and partial.get("contact_phone"):
+                                            # Skip to confirmation
+                                            partial_cart[from_number]["awaiting"] = "confirmation"
+                                            await send_checkout_confirmation(from_number)
+                                        else:
+                                            # Start fresh - show delivery areas
+                                            partial_cart[from_number] = partial_cart.get(from_number, {})
+                                            await send_delivery_area_list(from_number)
 
                             elif button_id == "continue_shopping":
                                 await send_main_menu(from_number, welcome=False)
@@ -467,6 +520,10 @@ async def receive_message(request: Request):
                                     del partial_cart[from_number]
                                 await send_whatsapp_message(from_number, "Checkout cancelled. Your cart items are still saved.")
                                 await send_main_menu(from_number, welcome=False)
+
+                            elif button_id == "edit_cart_checkout":
+                                # Go back to cart from order summary (keep address/phone)
+                                await send_cart_summary(from_number)
 
                             # Vendor response buttons
                             elif button_id.startswith("vendor_confirm_"):
@@ -1213,7 +1270,7 @@ async def send_cart_summary(to: str):
 
 async def send_edit_cart_list(to: str):
     """
-    Send interactive list of cart items for removal
+    Send interactive list of cart items for editing (change quantity or remove)
 
     Args:
         to: Recipient's WhatsApp number
@@ -1231,18 +1288,25 @@ async def send_edit_cart_list(to: str):
             "Content-Type": "application/json"
         }
 
-        # Build item rows
+        # Build item rows - each item gets 2 options: change qty and remove
         rows = []
-        for item in cart_items[:10]:  # Max 10 items in list
+        for item in cart_items[:5]:  # Max 5 items (2 rows each = 10 rows max)
             commodity = item.get("commodity", "")
             commodity_display = commodity.replace("_", " ").title()
             quantity = int(item.get("quantity", 1))
             unit = item.get("unit", "unit").replace("_", " ").title()
 
+            # Change quantity option
+            rows.append({
+                "id": f"change_qty_{commodity}",
+                "title": f"Edit {commodity_display}"[:24],
+                "description": f"Change quantity (currently {quantity}x)"[:72]
+            })
+            # Remove option
             rows.append({
                 "id": f"remove_{commodity}",
-                "title": f"{commodity_display}"[:24],
-                "description": f"Remove {quantity}x {unit} from cart"[:72]
+                "title": f"Remove {commodity_display}"[:24],
+                "description": f"Remove from cart"[:72]
             })
 
         payload = {
@@ -1288,6 +1352,82 @@ async def send_edit_cart_list(to: str):
 
     except Exception as e:
         logger.error(f"❌ Error sending edit cart list: {e}")
+        return False
+
+
+# Delivery areas PriceDeck covers
+DELIVERY_AREAS = [
+    {"id": "new_haven", "title": "New Haven", "description": "New Haven area"},
+    {"id": "ogui_road", "title": "Ogui Road", "description": "Ogui Road area"},
+    {"id": "independence_layout", "title": "Independence Layout", "description": "Independence Layout"},
+    {"id": "trans_ekulu", "title": "Trans Ekulu", "description": "Trans Ekulu area"},
+    {"id": "gra", "title": "GRA", "description": "Government Reserved Area"},
+    {"id": "presidential_road", "title": "Presidential Road", "description": "Presidential Road area"},
+    {"id": "golf", "title": "Golf", "description": "Golf Estate area"},
+    {"id": "okpara_avenue", "title": "Okpara Avenue", "description": "Okpara Avenue area"},
+    {"id": "agbani_road", "title": "Agbani Road", "description": "Agbani Road area"},
+    {"id": "area_not_listed", "title": "My area not listed", "description": "I'm outside these areas"}
+]
+
+
+async def send_delivery_area_list(to: str):
+    """
+    Send interactive list of delivery areas for checkout
+
+    Args:
+        to: Recipient's WhatsApp number
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        rows = [{"id": area["id"], "title": area["title"], "description": area["description"]} for area in DELIVERY_AREAS]
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "header": {
+                    "type": "text",
+                    "text": "Select Delivery Area"
+                },
+                "body": {
+                    "text": "📍 Select your delivery area\n\nNote: We only deliver to the listed areas."
+                },
+                "action": {
+                    "button": "Choose Area",
+                    "sections": [
+                        {
+                            "title": "Delivery Areas",
+                            "rows": rows
+                        }
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Delivery area list sent to {to}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send delivery area list: {response.status_code} - {response.text}")
+                return False
+
+    except Exception as e:
+        logger.error(f"❌ Error sending delivery area list: {e}")
         return False
 
 
@@ -1413,6 +1553,7 @@ async def send_checkout_confirmation(to: str):
                 "action": {
                     "buttons": [
                         {"type": "reply", "reply": {"id": "confirm_checkout", "title": "Pay Now"}},
+                        {"type": "reply", "reply": {"id": "edit_cart_checkout", "title": "Edit Cart"}},
                         {"type": "reply", "reply": {"id": "cancel_checkout", "title": "Cancel"}}
                     ]
                 }

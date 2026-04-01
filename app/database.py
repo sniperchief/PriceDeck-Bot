@@ -707,6 +707,55 @@ def clear_cart(whatsapp_number: str) -> bool:
         return False
 
 
+def update_cart_item_quantity(whatsapp_number: str, commodity: str, new_quantity: int) -> bool:
+    """
+    Update quantity of a specific item in user's cart
+
+    Args:
+        whatsapp_number: User's WhatsApp number
+        commodity: Commodity to update
+        new_quantity: New quantity (must be >= 1)
+
+    Returns:
+        True if successful
+    """
+    try:
+        if new_quantity < 1:
+            return False
+
+        # Get active cart
+        cart_response = supabase.table("carts")\
+            .select("id")\
+            .eq("whatsapp_number", whatsapp_number)\
+            .eq("is_active", True)\
+            .execute()
+
+        if not cart_response.data:
+            return False
+
+        cart_id = cart_response.data[0]["id"]
+
+        # Update item quantity
+        supabase.table("cart_items")\
+            .update({"quantity": new_quantity})\
+            .eq("cart_id", cart_id)\
+            .eq("commodity", commodity)\
+            .execute()
+
+        # Update cart timestamp
+        supabase.table("carts")\
+            .update({"updated_at": datetime.now(timezone.utc).isoformat()})\
+            .eq("id", cart_id)\
+            .execute()
+
+        logger.info(f"Updated {commodity} quantity to {new_quantity} for {whatsapp_number}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error updating cart item quantity: {e}")
+        return False
+
+
 def remove_cart_item(whatsapp_number: str, commodity: str) -> bool:
     """
     Remove a specific item from user's cart

@@ -246,6 +246,8 @@ async def process_message(
 
             if awaiting == "quantity":
                 return await handle_cart_quantity_input(user_phone, message_text)
+            elif awaiting == "new_quantity":
+                return await handle_quantity_change_input(user_phone, message_text)
             elif awaiting == "delivery_address":
                 return await handle_checkout_address_input(user_phone, message_text)
             elif awaiting == "contact_phone":
@@ -1169,6 +1171,59 @@ async def handle_cart_item_confirmation(user_phone: str, confirmed: bool) -> str
         logger.error(f"Error adding to cart: {e}")
         del partial_cart[user_phone]
         return "Couldn't add to cart. Try again?\n\n__AFTER_ACTION__"
+
+
+async def handle_quantity_change_input(user_phone: str, message_text: str) -> str:
+    """
+    Handle new quantity input for editing cart item quantity.
+
+    Args:
+        user_phone: User's WhatsApp number
+        message_text: User's message (new quantity)
+
+    Returns:
+        Response marker or message
+    """
+    global partial_cart
+
+    if user_phone not in partial_cart:
+        return "Something went wrong. Please start again.\n\n__AFTER_ACTION__"
+
+    partial = partial_cart[user_phone]
+    commodity = partial.get("editing_commodity")
+
+    if not commodity:
+        del partial_cart[user_phone]
+        return "Something went wrong. Please start again.\n\n__AFTER_ACTION__"
+
+    # Parse new quantity
+    text = message_text.strip()
+    try:
+        new_quantity = int(text)
+        if new_quantity < 1:
+            return "Quantity must be at least 1. Enter a valid quantity:"
+    except ValueError:
+        return "Please enter a valid number (e.g., 1, 2, 3):"
+
+    # Update quantity in database
+    try:
+        success = database.update_cart_item_quantity(user_phone, commodity, new_quantity)
+
+        # Clear editing state but keep other partial data
+        if "editing_commodity" in partial_cart[user_phone]:
+            del partial_cart[user_phone]["editing_commodity"]
+        if partial_cart[user_phone].get("awaiting") == "new_quantity":
+            del partial_cart[user_phone]["awaiting"]
+
+        if success:
+            commodity_display = clean_name(commodity)
+            return f"✅ Updated {commodity_display} to {new_quantity}.\n\n__VIEW_CART__"
+        else:
+            return "Couldn't update quantity. Try again?\n\n__AFTER_ACTION__"
+
+    except Exception as e:
+        logger.error(f"Error updating quantity: {e}")
+        return "Couldn't update quantity. Try again?\n\n__AFTER_ACTION__"
 
 
 async def handle_checkout_start(user_phone: str) -> str:
