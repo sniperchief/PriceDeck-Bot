@@ -463,67 +463,6 @@ def get_recent_prices_for_anomaly_check(commodity: str, city: str = "enugu", lim
         return []
 
 
-# =====================================================
-# ALERTS
-# =====================================================
-
-def save_alert(alert_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Save a new price alert
-
-    Args:
-        alert_data: Dictionary with keys: whatsapp_number, commodity, market (optional),
-                    threshold_price, direction ('above' or 'below')
-
-    Returns:
-        Saved alert record
-    """
-    try:
-        alert_data["is_active"] = True
-        alert_data["created_at"] = datetime.now(timezone.utc).isoformat()
-
-        response = supabase.table("alerts").insert(alert_data).execute()
-        logger.info(f"Alert saved for {alert_data['whatsapp_number']}: {alert_data['commodity']} {alert_data['direction']} {alert_data['threshold_price']}")
-        return response.data[0]
-
-    except Exception as e:
-        logger.error(f"Error saving alert: {e}")
-        raise
-
-
-def get_active_alerts() -> List[Dict[str, Any]]:
-    """
-    Get all active price alerts
-
-    Returns:
-        List of active alert records
-    """
-    try:
-        response = supabase.table("alerts").select("*").eq("is_active", True).execute()
-        return response.data if response.data else []
-    except Exception as e:
-        logger.error(f"Error getting active alerts: {e}")
-        return []
-
-
-def deactivate_alert(alert_id: str) -> bool:
-    """
-    Deactivate an alert after it's been triggered
-
-    Args:
-        alert_id: Alert ID to deactivate
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        response = supabase.table("alerts").update({"is_active": False}).eq("id", alert_id).execute()
-        return True
-    except Exception as e:
-        logger.error(f"Error deactivating alert: {e}")
-        return False
-
-
 def get_latest_price_for_commodity(commodity: str, market: str = None) -> Optional[Dict[str, Any]]:
     """
     Get the most recent price report for a commodity.

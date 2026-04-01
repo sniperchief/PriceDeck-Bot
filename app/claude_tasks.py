@@ -30,10 +30,7 @@ pending_price_reports: Dict[str, Dict[str, Any]] = {}
 # Store partial price reports awaiting market selection
 partial_price_reports: Dict[str, Dict[str, Any]] = {}
 
-# Store partial alerts awaiting completion
-partial_alerts: Dict[str, Dict[str, Any]] = {}
-
-# Store user action context (check_price, report_price, set_alert)
+# Store user action context (check_price, report_price)
 user_action_context: Dict[str, str] = {}
 
 # Store partial cart/checkout data
@@ -60,15 +57,6 @@ class PriceQueryData(BaseModel):
     commodity: Optional[str] = None
     market: Optional[str] = None
     query_type: str
-
-
-class AlertData(BaseModel):
-    """Extracted data from an alert setup message"""
-    commodity: str
-    threshold_price: float
-    direction: str
-    unit: Optional[str] = None
-    market: Optional[str] = None
 
 
 # =====================================================
@@ -99,8 +87,7 @@ def _get_help_message() -> str:
     """Return standard help message"""
     return (
         "📍 *Report*: \"Garri 45k bag Ogbete\"\n"
-        "🔍 *Check*: \"How much is rice?\"\n"
-        "🔔 *Alert*: \"Tell me when rice drops below 50k\""
+        "🔍 *Check*: \"How much is rice?\""
     )
 
 
@@ -154,13 +141,7 @@ Examples: "how much is rice?", "wetin be beans price?", "price of yellow garri"
 {{"action": "query_price", "commodity": "rice", "market": null}}
 ```
 
-3. ALERT - User wants notification when price changes
-Examples: "tell me when rice drops below 40k", "alert me if beans go above 50000"
-```json
-{{"action": "set_alert", "commodity": "rice", "threshold_price": 40000, "direction": "below"}}
-```
-
-4. GREETING/CHAT - Hello, hi, help, thanks, unclear messages
+3. GREETING/CHAT - Hello, hi, help, thanks, unclear messages
 → Reply briefly (1-2 lines), NO JSON
 → For greetings: Welcome them, ask which market they visited today
 
@@ -197,7 +178,7 @@ async def process_message(
     Returns:
         Response message to send back via WhatsApp
     """
-    global conversation_history, pending_price_reports, partial_price_reports, partial_alerts, user_action_context
+    global conversation_history, pending_price_reports, partial_price_reports, user_action_context
 
     try:
         # Handle empty messages
@@ -226,8 +207,6 @@ async def process_message(
                 del partial_price_reports[user_phone]
             if user_phone in pending_price_reports:
                 del pending_price_reports[user_phone]
-            if user_phone in partial_alerts:
-                del partial_alerts[user_phone]
             if user_phone in user_action_context:
                 del user_action_context[user_phone]
             if user_phone in partial_cart:
@@ -238,12 +217,6 @@ async def process_message(
         # Check if user is confirming a pending price report
         if user_phone in pending_price_reports:
             return await handle_price_confirmation(message_text, user_phone)
-
-        # Check if user is setting an alert (awaiting threshold)
-        if user_phone in partial_alerts:
-            partial = partial_alerts[user_phone]
-            if partial.get("awaiting") == "threshold":
-                return await handle_alert_threshold_input(user_phone, message_text)
 
         # Check if user is providing custom input (price, unit, or market)
         if user_phone in partial_price_reports:
@@ -403,15 +376,6 @@ async def process_message(
                         return "What commodity would you like to check?"
 
                     return await handle_query_prices(data)
-
-                elif action == "set_alert":
-                    data = AlertData(
-                        commodity=action_data.get("commodity"),
-                        threshold_price=float(action_data.get("threshold_price", 0)),
-                        direction=action_data.get("direction", "below"),
-                        market=action_data.get("market")
-                    )
-                    return await handle_set_alert(data, user_phone)
 
             except (json.JSONDecodeError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to parse action JSON: {e}")
@@ -599,137 +563,6 @@ async def handle_market_selection(user_phone: str, market_slug: str) -> str:
 
     # Proceed to confirmation
     return await handle_report_price(data, user_phone)
-
-
-# =====================================================
-# ALERT SELECTION HANDLERS
-# =====================================================
-
-async def handle_alert_variety_selection(user_phone: str, variety_id: str) -> str:
-    """
-    Handle variety selection for alert flow.
-    Stores variety and triggers unit selection.
-    """
-    global partial_alerts
-
-    if user_phone not in partial_alerts:
-        partial_alerts[user_phone] = {}
-
-    partial_alerts[user_phone]["commodity"] = variety_id
-    partial_alerts[user_phone]["awaiting"] = "unit"
-
-    return "__SELECT_UNIT__"
-
-
-async def handle_alert_unit_selection(user_phone: str, unit_id: str) -> str:
-    """
-    Handle unit selection for alert flow.
-    Stores unit, fetches current prices, and triggers direction selection.
-    """
-    global partial_alerts
-
-    if user_phone not in partial_alerts:
-        return "__MAIN_MENU__"
-
-    partial = partial_alerts[user_phone]
-    partial["unit"] = unit_id
-    partial["awaiting"] = "direction"
-
-    commodity = partial.get("commodity", "")
-    commodity_display = clean_name(commodity)
-    unit_display = clean_name(unit_id)
-
-    # Get current prices to show user
-    prices = database.get_prices_by_commodity_all_markets(commodity)
-
-    if not prices:
-        prices_text = f"*{commodity_display}* ({unit_display})\n\nNo prices yet - you'll be alerted when prices are reported."
-    else:
-        # Format prices
-        lines = [f"*{commodity_display}* current prices:"]
-        for p in prices[:4]:
-            market_name = clean_name(p['market'])
-            price_display = format_price(p['min_price'])
-            p_unit = clean_name(p.get('unit', 'unit'))
-            lines.append(f"📍 {market_name}: {price_display}/{p_unit}")
-        prices_text = "\n".join(lines)
-
-    # Return marker with prices text for direction buttons
-    return f"__DIRECTION__:{prices_text}"
-
-
-async def handle_alert_direction_selection(user_phone: str, direction: str) -> str:
-    """
-    Handle direction selection (below/above) for alert flow.
-    Stores direction and asks for threshold price.
-    """
-    global partial_alerts
-
-    if user_phone not in partial_alerts:
-        return "__MAIN_MENU__"
-
-    partial_alerts[user_phone]["direction"] = direction
-    partial_alerts[user_phone]["awaiting"] = "threshold"
-
-    unit = partial_alerts[user_phone].get("unit", "unit")
-    unit_display = clean_name(unit).lower()
-
-    return f"What price per {unit_display}? (e.g., 5000 or 5k)"
-
-
-async def handle_alert_threshold_input(user_phone: str, message_text: str) -> str:
-    """
-    Handle threshold price input for alert flow.
-    Parses price, saves alert, and returns confirmation.
-    """
-    global partial_alerts, user_action_context
-
-    if user_phone not in partial_alerts:
-        return "__MAIN_MENU__"
-
-    partial = partial_alerts[user_phone]
-
-    # Parse the threshold price
-    threshold = parse_price(message_text)
-    if threshold <= 0:
-        unit = partial.get("unit", "unit")
-        unit_display = clean_name(unit).lower()
-        return f"Please enter a valid price per {unit_display} (e.g., 5000 or 5k)"
-
-    # Build alert data
-    commodity = partial.get("commodity", "")
-    unit = partial.get("unit", "")
-    direction = partial.get("direction", "below")
-
-    # Save alert
-    try:
-        database.get_or_create_user(user_phone)
-
-        alert_data = {
-            "whatsapp_number": user_phone,
-            "commodity": commodity,
-            "unit": unit,
-            "threshold_price": threshold,
-            "direction": direction
-        }
-        database.save_alert(alert_data)
-
-        # Clear state
-        del partial_alerts[user_phone]
-        if user_phone in user_action_context:
-            del user_action_context[user_phone]
-
-        # Format confirmation
-        commodity_display = clean_name(commodity)
-        price_display = format_price(threshold)
-        unit_display = clean_name(unit)
-        direction_symbol = "📉" if direction == "below" else "📈"
-
-        return f"🔔 Alert set! {commodity_display} {direction_symbol} {price_display}/{unit_display}\n\n__AFTER_ACTION__"
-
-    except Exception as e:
-        logger.error(f"Error saving alert: {e}")
-        return "Couldn't set alert. Try again?\n\n__AFTER_ACTION__"
 
 
 def parse_price(text: str) -> float:
@@ -1029,47 +862,13 @@ async def handle_query_prices(data: PriceQueryData) -> str:
         return "Couldn't fetch prices. Try again?"
 
 
-async def handle_set_alert(data: AlertData, user_phone: str) -> str:
-    """Handle alert creation (text-based flow through Claude)"""
-    try:
-        # Ensure user exists
-        database.get_or_create_user(user_phone)
-
-        alert_data = {
-            "whatsapp_number": user_phone,
-            "commodity": data.commodity,
-            "threshold_price": data.threshold_price,
-            "direction": data.direction,
-            "market": data.market
-        }
-        # Add unit if available
-        if data.unit:
-            alert_data["unit"] = data.unit
-
-        database.save_alert(alert_data)
-
-        commodity_display = clean_name(data.commodity)
-        price_display = format_price(data.threshold_price)
-        direction_symbol = "📉" if data.direction == "below" else "📈"
-
-        if data.unit:
-            unit_display = clean_name(data.unit)
-            return f"🔔 Alert set! {commodity_display} {direction_symbol} {price_display}/{unit_display}\n\n__AFTER_ACTION__"
-        else:
-            return f"🔔 Alert set! {commodity_display} {direction_symbol} {price_display}\n\n__AFTER_ACTION__"
-
-    except Exception as e:
-        logger.error(f"Error setting alert: {e}", exc_info=True)
-        return "Couldn't set alert. Try again?"
-
-
 def handle_greeting_help(intent_type: str, user_name: str = None) -> str:
     """Handle greetings and help requests"""
     if intent_type == "greeting":
         name = f" {user_name}" if user_name else ""
         return (
             f"Hey{name}! 👋 Welcome to *PriceDeck*\n\n"
-            "Share prices, check prices, get alerts.\n\n"
+            "Share prices, check prices, shop from Ogbete.\n\n"
             "Which market did you visit today?"
         )
     else:
@@ -1080,37 +879,46 @@ def handle_greeting_help(intent_type: str, user_name: str = None) -> str:
 # CART & CHECKOUT HANDLERS
 # =====================================================
 
-async def handle_add_to_cart(user_phone: str, commodity: str) -> str:
+async def handle_add_to_cart(user_phone: str, commodity: str, unit: str = None, unit_price: float = None) -> str:
     """
     Initialize add-to-cart flow for a commodity.
-    Gets latest Ogbete price and asks for quantity.
+    Uses provided price/unit or fetches from database if not provided.
 
     Args:
         user_phone: User's WhatsApp number
         commodity: Commodity to add (e.g., "rice_local")
+        unit: Unit type (e.g., "paint", "bag") - optional
+        unit_price: Price per unit - optional
 
     Returns:
         Response marker or message
     """
     global partial_cart
 
-    # Get latest price from Ogbete
-    price_data = database.get_latest_price_for_commodity(commodity, market="ogbete")
-
-    if not price_data:
-        return "Sorry, no price available for this item at Ogbete Market right now.\n\n__AFTER_ACTION__"
+    # Use provided price/unit or fetch from database
+    if unit and unit_price:
+        # Use the price/unit that was shown to user
+        actual_unit = unit
+        actual_price = unit_price
+    else:
+        # Fallback: fetch latest price from Ogbete
+        price_data = database.get_latest_price_for_commodity(commodity, market="ogbete")
+        if not price_data:
+            return "Sorry, no price available for this item at Ogbete Market right now.\n\n__AFTER_ACTION__"
+        actual_unit = price_data.get("unit", "unit")
+        actual_price = price_data.get("price", 0)
 
     # Store partial cart data
     partial_cart[user_phone] = {
         "awaiting": "quantity",
         "commodity": commodity,
-        "unit": price_data.get("unit", "unit"),
-        "unit_price": price_data.get("price", 0)
+        "unit": actual_unit,
+        "unit_price": actual_price
     }
 
     commodity_display = clean_name(commodity)
-    unit_display = clean_name(price_data.get("unit", "unit"))
-    price_display = format_price(price_data.get("price", 0))
+    unit_display = clean_name(actual_unit)
+    price_display = format_price(actual_price)
 
     return f"*{commodity_display}* - {price_display}/{unit_display}\n\nHow many {unit_display.lower()}s do you want?"
 

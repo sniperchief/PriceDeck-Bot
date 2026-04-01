@@ -43,7 +43,6 @@ from app.database import (
 from app.config import DELIVERY_FEE, ADMIN_WHATSAPP_NUMBER
 from datetime import datetime, time as dt_time
 from zoneinfo import ZoneInfo
-from app import alert_service
 
 # Configure logging
 logging.basicConfig(
@@ -67,10 +66,6 @@ MARKETS_CACHE = []
 # Key: message_id, Value: timestamp when processed
 processed_message_ids = {}
 MAX_PROCESSED_CACHE = 1000  # Keep last 1000 message IDs
-
-# Background task reference
-alert_checker_task = None
-
 
 def is_message_processed(message_id: str) -> bool:
     """
@@ -96,7 +91,7 @@ def is_message_processed(message_id: str) -> bool:
 @app.on_event("startup")
 async def startup_event():
     """Initialize app on startup"""
-    global MARKETS_CACHE, alert_checker_task
+    global MARKETS_CACHE
 
     logger.info("Starting PriceDeck application...")
 
@@ -109,32 +104,11 @@ async def startup_event():
         MARKETS_CACHE = get_all_active_markets()
         logger.info(f"✅ Loaded {len(MARKETS_CACHE)} active markets into cache")
 
-        # Set up alert service with message sender
-        alert_service.set_message_sender(send_whatsapp_message)
-
-        # Start background alert checker
-        alert_checker_task = asyncio.create_task(alert_service.alert_checker_loop())
-        logger.info("✅ Alert checker background task started")
-
         logger.info("✅ PriceDeck is ready to receive messages")
 
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
         raise
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up on shutdown"""
-    global alert_checker_task
-
-    if alert_checker_task:
-        alert_checker_task.cancel()
-        try:
-            await alert_checker_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("✅ Alert checker background task stopped")
 
 
 @app.get("/")
@@ -437,8 +411,18 @@ async def receive_message(request: Request):
 
                             # Cart buttons
                             elif button_id.startswith("add_to_cart_"):
-                                commodity = button_id.replace("add_to_cart_", "")
-                                response_text = await handle_add_to_cart(from_number, commodity)
+                                # Format: add_to_cart_{commodity}_{unit}_{price}
+                                # Parse from end since commodity can have underscores
+                                parts = button_id.replace("add_to_cart_", "").split("_")
+                                if len(parts) >= 3:
+                                    price = parts[-1]
+                                    unit = parts[-2]
+                                    commodity = "_".join(parts[:-2])
+                                    response_text = await handle_add_to_cart(from_number, commodity, unit, float(price))
+                                else:
+                                    # Fallback for old format (just commodity)
+                                    commodity = button_id.replace("add_to_cart_", "")
+                                    response_text = await handle_add_to_cart(from_number, commodity)
                                 if "__AFTER_ACTION__" in response_text:
                                     message_part = response_text.replace("__AFTER_ACTION__", "").strip()
                                     await send_whatsapp_message(from_number, message_part)
@@ -571,6 +555,9 @@ async def receive_message(request: Request):
                                         await send_unit_list(from_number)
                                     elif response_text == "__SELECT_MARKET__":
                                         await send_market_list(from_number, MARKETS_CACHE)
+                                    elif response_text.startswith("__CHECK_PRICE_UNIT__:"):
+                                        commodity_display = response_text.split(":")[1]
+                                        await send_check_price_unit_buttons(from_number, commodity_display)
                                     elif "__ADD_TO_CART__:" in response_text:
                                         # Format: message\n\n__ADD_TO_CART__:commodity:price:unit
                                         parts = response_text.split("__ADD_TO_CART__:")
@@ -1173,7 +1160,7 @@ async def send_add_to_cart_buttons(to: str, commodity: str, price: str, unit: st
                     "body": {"text": body_text},
                     "action": {
                         "buttons": [
-                            {"type": "reply", "reply": {"id": f"add_to_cart_{commodity}", "title": "Add to Cart"}},
+                            {"type": "reply", "reply": {"id": f"add_to_cart_{commodity}_{unit}_{price}", "title": "Add to Cart"}},
                             {"type": "reply", "reply": {"id": "view_cart", "title": "View Cart"}}
                         ]
                     }

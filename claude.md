@@ -16,15 +16,15 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 |------|---------|
 | `main.py` | FastAPI app, webhook handler, WhatsApp message sender, interactive UI builders |
 | `claude_tasks.py` | Claude NLU integration, conversation history, action handlers |
-| `database.py` | Supabase CRUD operations (users, markets, prices, alerts) |
-| `alert_service.py` | Background task for checking/triggering price alerts |
+| `database.py` | Supabase CRUD operations (users, markets, prices, carts, orders) |
+| `paystack_service.py` | Paystack payment integration |
 | `config.py` | Environment configuration validation |
 
 ## Core Features
 
 1. **Price Checking** - Users ask "How much is rice?" to get current market prices
 2. **Price Reporting** - Verified contributors submit commodity prices from specific markets
-3. **Price Alerts** - Users set alerts for when prices go above/below thresholds
+3. **Shopping Cart** - Users can add items to cart and checkout with Paystack payment (Ogbete Market only)
 4. **Contributor System** - Users with 10+ verified submissions become verified contributors
 
 ## Supported Data
@@ -40,13 +40,15 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 - `users` - WhatsApp profiles, contribution counts, verified status
 - `markets` - Active markets
 - `price_reports` - Price submissions with commodity, price, unit, market
-- `alerts` - User price alerts with threshold and direction
+- `vendors` - Registered vendors for shopping feature
+- `carts` / `cart_items` - Shopping cart data
+- `orders` - Checkout orders with payment status
 
 ## State Management
 
-- `user_action_context` - Tracks current user action (check_price, report_price, set_alert)
+- `user_action_context` - Tracks current user action (check_price, report_price)
 - `partial_price_reports` - Incomplete price report data during multi-step flow
-- `partial_alerts` - Incomplete alert data during setup
+- `partial_cart` - Incomplete cart/checkout data during shopping flow
 - Conversation history per user (last 10 messages)
 
 ## Response Markers
@@ -54,8 +56,11 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 Used in `claude_tasks.py` to trigger UI flows in `main.py`:
 - `__SELECT_UNIT__` - Show unit selection list
 - `__SELECT_MARKET__` - Show market selection list
-- `__DIRECTION__` - Show above/below buttons for alerts
 - `__CONFIRM_PRICE__` - Show confirmation buttons
+- `__ADD_TO_CART__` - Show add to cart button
+- `__VIEW_CART__` - Show cart with checkout options
+- `__CHECKOUT_PHONE__` - Phone selection for checkout
+- `__PAYMENT_LINK__` - Send Paystack payment link
 
 ## Environment Variables
 
@@ -70,5 +75,3 @@ Required in `.env`:
 ```bash
 uvicorn main:app --reload
 ```
-
-Alert service runs as background task on startup.
