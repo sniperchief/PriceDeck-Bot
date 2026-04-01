@@ -271,6 +271,10 @@ async def receive_message(request: Request):
                                 url = parts[1]
                                 order_number = parts[2]
                                 await send_payment_link(from_number, url, order_number)
+                        elif response_text.startswith("__CHECK_PRICE_UNIT__:"):
+                            # Format: __CHECK_PRICE_UNIT__:commodity_display
+                            commodity_display = response_text.split(":")[1]
+                            await send_check_price_unit_buttons(from_number, commodity_display)
                         else:
                             await send_whatsapp_message(from_number, response_text)
 
@@ -393,6 +397,28 @@ async def receive_message(request: Request):
                                 else:
                                     await send_contributor_onboarding(from_number)
 
+
+                            # Check price unit selection buttons (Paint, Bag, Half Bag)
+                            elif button_id.startswith("check_unit_"):
+                                unit = button_id.replace("check_unit_", "")
+                                from app.claude_tasks import handle_check_price_unit_selection
+                                response_text = await handle_check_price_unit_selection(from_number, unit)
+                                if "__ADD_TO_CART__:" in response_text:
+                                    # Format: message\n\n__ADD_TO_CART__:commodity:price:unit
+                                    parts = response_text.split("__ADD_TO_CART__:")
+                                    message_part = parts[0].strip()
+                                    cart_info = parts[1].split(":")
+                                    await send_whatsapp_message(from_number, message_part)
+                                    if len(cart_info) >= 3:
+                                        await send_add_to_cart_buttons(from_number, cart_info[0], cart_info[1], cart_info[2])
+                                elif "__AFTER_ACTION__" in response_text:
+                                    message_part = response_text.replace("__AFTER_ACTION__", "").strip()
+                                    await send_whatsapp_message(from_number, message_part)
+                                    await send_main_menu(from_number, welcome=False)
+                                elif response_text == "__MAIN_MENU__":
+                                    await send_main_menu(from_number, welcome=True)
+                                else:
+                                    await send_whatsapp_message(from_number, response_text)
 
                             # Commodity selection buttons (check flow)
                             elif button_id.startswith("check_"):
@@ -1054,6 +1080,58 @@ async def send_contributor_onboarding(to: str):
         "Want to join? Reply *JOIN* to apply."
     )
     await send_whatsapp_message(to, message)
+
+
+async def send_check_price_unit_buttons(to: str, commodity_display: str):
+    """
+    Send unit selection buttons for price checking (Paint, Bag, Half Bag)
+
+    Args:
+        to: Recipient's WhatsApp number
+        commodity_display: Display name of commodity (e.g., "White Garri")
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": f"What unit for {commodity_display}?"},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "check_unit_paint", "title": "Paint"}},
+                        {"type": "reply", "reply": {"id": "check_unit_bag", "title": "Bag"}},
+                        {"type": "reply", "reply": {"id": "check_unit_half_bag", "title": "Half Bag"}}
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Check price unit buttons sent to {to}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send check price unit buttons: {response.status_code} - {response.text}")
+                return False
+
+    except Exception as e:
+        logger.error(f"❌ Error sending check price unit buttons: {e}")
+        return False
 
 
 # =====================================================

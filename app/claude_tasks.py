@@ -442,39 +442,16 @@ async def handle_variety_selection(user_phone: str, variety_id: str) -> str:
 
     action = user_action_context.get(user_phone, "report_price")
 
-    # CHECK PRICE FLOW - get and return prices
+    # CHECK PRICE FLOW - ask for unit first, then show prices
     if action == "check_price":
+        # Store variety and ask for unit
+        partial_price_reports[user_phone] = {
+            "commodity": variety_id,
+            "action": "check_price",
+            "awaiting": "check_unit"
+        }
         commodity_display = clean_name(variety_id)
-        prices = database.get_prices_by_commodity_all_markets(variety_id)
-
-        if not prices:
-            return f"No {commodity_display} prices yet. Be the first to share!\n\n__AFTER_ACTION__"
-
-        # Format prices for display
-        response = f"*{commodity_display}* prices in Enugu:\n\n"
-        ogbete_price = None
-        ogbete_unit = None
-
-        for market_data in prices[:5]:  # Show top 5 markets
-            market_name = clean_name(market_data.get("market", ""))
-            min_price = format_price(market_data.get("min_price", 0))
-            unit_name = clean_name(market_data.get("unit", "unit"))
-            response += f"📍 {market_name}: {min_price}/{unit_name}\n"
-
-            # Track Ogbete price for cart option
-            if market_data.get("market") == "ogbete":
-                ogbete_price = market_data.get("min_price")
-                ogbete_unit = market_data.get("unit")
-
-        # Clear action context
-        if user_phone in user_action_context:
-            del user_action_context[user_phone]
-
-        # If Ogbete has price, include marker for add-to-cart button
-        if ogbete_price:
-            return f"{response}\n__ADD_TO_CART__:{variety_id}:{ogbete_price}:{ogbete_unit}"
-        else:
-            return response + "\n__AFTER_ACTION__"
+        return f"__CHECK_PRICE_UNIT__:{commodity_display}"
 
     # REPORT PRICE FLOW - continue to unit selection
     partial = partial_price_reports.get(user_phone)
@@ -539,6 +516,56 @@ async def handle_unit_selection(user_phone: str, unit_id: str) -> str:
 
     # Return prompt with unit included
     return f"What's the price per {unit_display}?"
+
+
+async def handle_check_price_unit_selection(user_phone: str, unit_id: str) -> str:
+    """
+    Handle when user selects a unit for checking prices.
+    Fetches prices filtered by commodity and unit.
+    """
+    global partial_price_reports, user_action_context
+
+    partial = partial_price_reports.get(user_phone)
+    if not partial or partial.get("action") != "check_price":
+        return "__MAIN_MENU__"
+
+    commodity = partial.get("commodity")
+    if not commodity:
+        return "__MAIN_MENU__"
+
+    # Get prices filtered by commodity and unit
+    prices = database.get_prices_by_commodity_and_unit(commodity, unit_id)
+
+    commodity_display = clean_name(commodity)
+    unit_display = clean_name(unit_id)
+
+    # Clear partial data
+    if user_phone in partial_price_reports:
+        del partial_price_reports[user_phone]
+    if user_phone in user_action_context:
+        del user_action_context[user_phone]
+
+    if not prices:
+        return f"No {commodity_display} prices for {unit_display} yet. Be the first to share!\n\n__AFTER_ACTION__"
+
+    # Format prices for display
+    response = f"*{commodity_display}* ({unit_display}) prices:\n\n"
+    ogbete_price = None
+
+    for market_data in prices[:5]:  # Show top 5 markets
+        market_name = clean_name(market_data.get("market", ""))
+        price = format_price(market_data.get("price", 0))
+        response += f"📍 {market_name}: {price}/{unit_display}\n"
+
+        # Track Ogbete price for cart option
+        if market_data.get("market") == "ogbete":
+            ogbete_price = market_data.get("price")
+
+    # If Ogbete has price, include marker for add-to-cart button
+    if ogbete_price:
+        return f"{response}\n__ADD_TO_CART__:{commodity}:{ogbete_price}:{unit_id}"
+    else:
+        return response + "\n__AFTER_ACTION__"
 
 
 # =====================================================

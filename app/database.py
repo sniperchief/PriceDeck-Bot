@@ -374,6 +374,66 @@ def get_prices_by_commodity_single_market(commodity: str, market: str, city: str
         return []
 
 
+def get_prices_by_commodity_and_unit(commodity: str, unit: str, city: str = "enugu") -> List[Dict[str, Any]]:
+    """
+    Get latest prices for a commodity filtered by unit across all markets.
+    Returns one price per market (most recent).
+
+    Args:
+        commodity: Standardized commodity name (e.g., "garri_white")
+        unit: Unit to filter by (e.g., "paint", "bag")
+        city: City to search in (default: "enugu")
+
+    Returns:
+        List of price data by market, filtered by unit
+    """
+    try:
+        # Get all prices for this commodity and unit, ordered by most recent first
+        response = supabase.table("price_reports")\
+            .select("*")\
+            .eq("commodity", commodity)\
+            .eq("unit", unit)\
+            .eq("city", city)\
+            .eq("is_flagged", False)\
+            .order("reported_at", desc=True)\
+            .execute()
+
+        if not response.data:
+            return []
+
+        # Get active markets only
+        active_markets = get_all_active_markets()
+        active_market_slugs = {m["slug"] for m in active_markets}
+
+        # Get only the latest price per market
+        market_data = {}
+        for report in response.data:
+            market = report["market"]
+
+            # Skip inactive markets
+            if market not in active_market_slugs:
+                continue
+
+            # Only keep the first (latest) record per market
+            if market not in market_data:
+                market_data[market] = {
+                    "market": market,
+                    "price": report["price"],
+                    "unit": report["unit"],
+                    "last_reported": report["reported_at"]
+                }
+
+        # Convert to list and sort by price (cheapest first)
+        result = list(market_data.values())
+        result.sort(key=lambda x: x["price"])
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting prices by commodity and unit: {e}")
+        return []
+
+
 def get_recent_prices_for_anomaly_check(commodity: str, city: str = "enugu", limit: int = 5) -> List[Dict[str, Any]]:
     """
     Get recent prices for a commodity to check for anomalies
