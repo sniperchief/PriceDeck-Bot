@@ -204,7 +204,22 @@ async def process_message(
         if not message_text or not message_text.strip():
             return _get_help_message()
 
-        # Check if this is a menu trigger FIRST (before any state checks)
+        # IMPORTANT: Check cart/checkout flow FIRST (before menu triggers)
+        # This prevents addresses like "Chime Avenue" from triggering menu (contains "hi")
+        if user_phone in partial_cart:
+            partial = partial_cart[user_phone]
+            awaiting = partial.get("awaiting")
+
+            if awaiting == "quantity":
+                return await handle_cart_quantity_input(user_phone, message_text)
+            elif awaiting == "new_quantity":
+                return await handle_quantity_change_input(user_phone, message_text)
+            elif awaiting == "delivery_address":
+                return await handle_checkout_address_input(user_phone, message_text)
+            elif awaiting == "contact_phone":
+                return await handle_checkout_phone_input(user_phone, message_text)
+
+        # Check if this is a menu trigger (greetings, help, etc.)
         if is_menu_trigger(message_text):
             # Clear any stale partial data
             if user_phone in partial_price_reports:
@@ -238,20 +253,6 @@ async def process_message(
                 return result
             # Otherwise return the result (could be next step or message)
             return result
-
-        # Check if user is in cart/checkout flow
-        if user_phone in partial_cart:
-            partial = partial_cart[user_phone]
-            awaiting = partial.get("awaiting")
-
-            if awaiting == "quantity":
-                return await handle_cart_quantity_input(user_phone, message_text)
-            elif awaiting == "new_quantity":
-                return await handle_quantity_change_input(user_phone, message_text)
-            elif awaiting == "delivery_address":
-                return await handle_checkout_address_input(user_phone, message_text)
-            elif awaiting == "contact_phone":
-                return await handle_checkout_phone_input(user_phone, message_text)
 
         # Build markets list for prompt
         if available_markets:
