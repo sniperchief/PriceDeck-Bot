@@ -28,6 +28,8 @@ PAYSTACK_PUBLIC_KEY = os.getenv("PAYSTACK_PUBLIC_KEY")
 
 # Shopping Configuration
 DELIVERY_FEE = int(os.getenv("DELIVERY_FEE", "500"))
+SERVICE_CHARGE_PERCENT = float(os.getenv("SERVICE_CHARGE_PERCENT", "0.10"))  # 10%
+SERVICE_CHARGE_CAP = int(os.getenv("SERVICE_CHARGE_CAP", "3000"))  # Max ₦3,000
 
 # Environment
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")

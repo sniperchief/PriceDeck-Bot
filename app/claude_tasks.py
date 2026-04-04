@@ -99,14 +99,15 @@ SYSTEM_PROMPT = """You are PriceDeck, a WhatsApp bot for commodity prices in Enu
 
 YOUR JOB: Extract data from user messages and return JSON. System handles responses and missing fields.
 
-MARKETS: {markets}
-COMMODITIES: garri, rice, beans, tomatoes, pepper, palm oil, yam, plantain, beef, chicken, fish, eggs, onions, crayfish, cement
-UNITS: paint, half_paint, cup, bag, half_bag, mudu, kg, piece, basket, congo
+MARKETS: ogbete_main (Ogbete Market is the only supported market)
+COMMODITIES: garri, rice, beans, egg, crayfish, palm_oil (red oil)
+UNITS: paint, half_paint, bag, half_bag, kg, crate
 
 COMMODITY VARIETIES (use these exact names when user specifies type):
 - Garri: garri_white, garri_yellow, garri_ijebu
 - Rice: rice_local, rice_foreign, rice_ofada
 - Beans: beans_oloyin, beans_brown, beans_iron
+- Egg: egg_jumbo, egg_small
 
 DETECT THESE INTENTS:
 
@@ -199,6 +200,28 @@ async def process_message(
                 return await handle_checkout_address_input(user_phone, message_text)
             elif awaiting == "contact_phone":
                 return await handle_checkout_phone_input(user_phone, message_text)
+
+        # Check for slash commands
+        if message_text.strip().startswith("/"):
+            command = message_text.strip().lower()
+            if command == "/orders":
+                return "__MY_ORDERS__"
+            elif command == "/cart":
+                return "__VIEW_CART__"
+            elif command == "/help":
+                return "__HELP__"
+            elif command == "/online":
+                return "__AGENT_ONLINE__"
+            # Unknown command - show help
+            else:
+                return (
+                    "*Available Commands:*\n\n"
+                    "/orders - View your orders\n"
+                    "/cart - View your cart\n"
+                    "/online - Check in for pickups (agents)\n"
+                    "/help - Show this help\n\n"
+                    "__AFTER_ACTION__"
+                )
 
         # Check if this is a menu trigger (greetings, help, etc.)
         if is_menu_trigger(message_text):
@@ -313,7 +336,7 @@ async def process_message(
                         return "What's the price?"
 
                     # Commodities that need variety selection
-                    variety_commodities = ["garri", "rice", "beans"]
+                    variety_commodities = ["garri", "rice", "beans", "egg"]
 
                     # Check if commodity needs variety and doesn't already have one
                     # e.g., "garri" needs variety, but "garri_yellow" already has it
@@ -342,16 +365,9 @@ async def process_message(
                         }
                         return "__SELECT_UNIT__"
 
-                    # Check market
+                    # Auto-select Ogbete as the only market
                     if not market:
-                        # Store partial data and trigger market list
-                        partial_price_reports[user_phone] = {
-                            "commodity": commodity,
-                            "price": float(price),
-                            "unit": unit,
-                            "awaiting": "market"
-                        }
-                        return "__SELECT_MARKET__"
+                        market = "ogbete_main"
 
                     data = PriceReportData(
                         commodity=commodity,
@@ -439,8 +455,8 @@ async def handle_variety_selection(user_phone: str, variety_id: str) -> str:
         unit_display = clean_name(partial.get("unit", "unit"))
         return f"What's the price per {unit_display.lower()}?"
     elif not partial.get("market"):
-        partial_price_reports[user_phone]["awaiting"] = "market"
-        return "__SELECT_MARKET__"
+        # Auto-select Ogbete as the only market
+        partial_price_reports[user_phone]["market"] = "ogbete_main"
     else:
         # All data present, proceed to confirmation
         data = PriceReportData(
@@ -636,10 +652,27 @@ async def handle_custom_input(message_text: str, user_phone: str) -> str:
             unit_display = partial.get("unit", "unit").replace("_", " ").lower()
             return f"Please enter a valid price per {unit_display} (e.g., 5000 or 5k)"
 
-        # Store price and go to market selection
+        # Store price and auto-select Ogbete (only market)
         partial_price_reports[user_phone]["price"] = price
-        partial_price_reports[user_phone]["awaiting"] = "market"
-        return "__SELECT_MARKET__"
+        partial_price_reports[user_phone]["market"] = "ogbete_main"
+
+        # Check if we have all required fields now
+        partial = partial_price_reports[user_phone]
+        if partial.get("commodity") and partial.get("price") and partial.get("unit"):
+            data = PriceReportData(
+                commodity=partial["commodity"],
+                commodity_raw=partial["commodity"],
+                price=partial["price"],
+                unit=partial["unit"],
+                unit_raw=partial["unit"],
+                market="ogbete_main",
+                market_raw="ogbete_main"
+            )
+            del partial_price_reports[user_phone]
+            return await handle_report_price(data, user_phone)
+        else:
+            # Something missing, shouldn't happen but fallback
+            return "__SELECT_UNIT__"
 
     elif awaiting == "variety":
         # User should have tapped a button, not typed text
@@ -662,15 +695,15 @@ async def handle_custom_input(message_text: str, user_phone: str) -> str:
             del partial_price_reports[user_phone]
             return "__MAIN_MENU__"
 
-        # User typed a custom market - complete the price report
+        # Auto-select Ogbete (only market supported)
         data = PriceReportData(
             commodity=partial["commodity"],
             commodity_raw=partial["commodity"],
             price=partial["price"],
             unit=partial["unit"],
             unit_raw=partial["unit"],
-            market=input_text.lower().replace(" ", "_"),
-            market_raw=input_text
+            market="ogbete_main",
+            market_raw="Ogbete Main Market"
         )
 
         # Clear partial data
@@ -1163,7 +1196,7 @@ async def handle_checkout_confirm(user_phone: str) -> str:
         Payment link marker or error message
     """
     global partial_cart, user_action_context
-    from app.config import DELIVERY_FEE
+    from app.config import DELIVERY_FEE, SERVICE_CHARGE_PERCENT, SERVICE_CHARGE_CAP
 
     if user_phone not in partial_cart:
         return "Something went wrong. Please start again.\n\n__AFTER_ACTION__"
@@ -1177,8 +1210,13 @@ async def handle_checkout_confirm(user_phone: str) -> str:
 
     # Calculate totals
     subtotal = sum(item["quantity"] * item["unit_price"] for item in cart_items)
+
+    # Calculate service charge (10% capped at 3k, rounded down)
+    service_charge = int(subtotal * SERVICE_CHARGE_PERCENT)
+    service_charge = min(service_charge, SERVICE_CHARGE_CAP)
+
     delivery_fee = DELIVERY_FEE
-    total = subtotal + delivery_fee
+    total = subtotal + service_charge + delivery_fee
 
     # Get vendor for Ogbete
     vendor = database.get_vendor_for_market("ogbete")
@@ -1190,6 +1228,7 @@ async def handle_checkout_confirm(user_phone: str) -> str:
             vendor_id=vendor["id"] if vendor else None,
             items=cart_items,
             subtotal=subtotal,
+            service_charge=service_charge,
             delivery_fee=delivery_fee,
             total=total,
             delivery_address=partial.get("delivery_address", ""),
@@ -1238,7 +1277,7 @@ def get_cart_summary_text(user_phone: str) -> str:
     Returns:
         Formatted cart summary
     """
-    from app.config import DELIVERY_FEE
+    from app.config import DELIVERY_FEE, SERVICE_CHARGE_PERCENT, SERVICE_CHARGE_CAP
 
     cart_items = database.get_cart_items(user_phone)
 
@@ -1258,10 +1297,15 @@ def get_cart_summary_text(user_phone: str) -> str:
         total_display = format_price(item_total)
         lines.append(f"• {commodity_display} x{quantity} ({price_display}/{unit_display}) = {total_display}")
 
+    # Calculate service charge (10% capped at 3k, rounded down)
+    service_charge = int(subtotal * SERVICE_CHARGE_PERCENT)
+    service_charge = min(service_charge, SERVICE_CHARGE_CAP)
+
     delivery_fee = DELIVERY_FEE
-    total = subtotal + delivery_fee
+    total = subtotal + service_charge + delivery_fee
 
     lines.append(f"\n*Subtotal:* {format_price(subtotal)}")
+    lines.append(f"*Service Charge:* {format_price(service_charge)}")
     lines.append(f"*Delivery:* {format_price(delivery_fee)}")
     lines.append(f"*Total:* {format_price(total)}")
     lines.append("\n_Shopping available for Ogbete Market only._")

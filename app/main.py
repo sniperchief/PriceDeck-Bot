@@ -38,7 +38,11 @@ from app.database import (
     is_vendor,
     get_order_by_id,
     update_order_status,
-    get_vendor_for_market
+    get_vendor_for_market,
+    get_user_orders,
+    get_logistics_for_market,
+    get_pickup_agent_for_market,
+    get_vendor_with_location
 )
 from app.config import DELIVERY_FEE, ADMIN_WHATSAPP_NUMBER
 from datetime import datetime, time as dt_time
@@ -100,9 +104,10 @@ async def startup_event():
         validate_config()
         logger.info("✅ Configuration validated successfully")
 
-        # Load markets from database into cache
-        MARKETS_CACHE = get_all_active_markets()
-        logger.info(f"✅ Loaded {len(MARKETS_CACHE)} active markets into cache")
+        # Load markets from database into cache (only Ogbete for now)
+        all_markets = get_all_active_markets()
+        MARKETS_CACHE = [m for m in all_markets if m.get("slug") == "ogbete_main"]
+        logger.info(f"✅ Loaded {len(MARKETS_CACHE)} active markets into cache (Ogbete only)")
 
         logger.info("✅ PriceDeck is ready to receive messages")
 
@@ -249,6 +254,44 @@ async def receive_message(request: Request):
                             # Format: __CHECK_PRICE_UNIT__:commodity_display
                             commodity_display = response_text.split(":")[1]
                             await send_check_price_unit_buttons(from_number, commodity_display)
+                        elif response_text == "__MY_ORDERS__":
+                            await send_my_orders(from_number)
+                        elif response_text == "__HELP__":
+                            help_text = (
+                                "*PriceDeck Help*\n\n"
+                                "*Commands:*\n"
+                                "/orders - View your orders\n"
+                                "/cart - View your cart\n"
+                                "/online - Check in for pickups (agents)\n"
+                                "/help - Show this help\n\n"
+                                "*Tips:*\n"
+                                "• Check prices for commodities at Ogbete Market\n"
+                                "• Add items to cart and checkout\n"
+                                "• Track your orders anytime"
+                            )
+                            await send_whatsapp_message(from_number, help_text)
+                            await send_main_menu(from_number, welcome=False)
+                        elif response_text == "__AGENT_ONLINE__":
+                            # Check if user is a pickup agent
+                            agent = get_pickup_agent_for_market("ogbete_main")
+                            if agent and agent.get("whatsapp_number") == from_number:
+                                await send_whatsapp_message(
+                                    from_number,
+                                    "✅ You're online for today!\n\n"
+                                    "You'll receive pickup notifications for Ogbete Market orders."
+                                )
+                            elif is_user_contributor(from_number):
+                                await send_whatsapp_message(
+                                    from_number,
+                                    "You're a verified contributor but not assigned as a pickup agent.\n\n"
+                                    "Contact admin to be assigned."
+                                )
+                            else:
+                                await send_whatsapp_message(
+                                    from_number,
+                                    "This command is for pickup agents only."
+                                )
+                            await send_main_menu(from_number, welcome=False)
                         else:
                             await send_whatsapp_message(from_number, response_text)
 
@@ -321,8 +364,42 @@ async def receive_message(request: Request):
                                 area_name = area_names.get(selected_id, selected_id)
                                 await send_whatsapp_message(from_number, f"Enter your delivery address in {area_name}\n\n(e.g., street name, house number, landmark):")
 
+                            # Check if it's a commodity selection (from list)
+                            elif selected_id.startswith("check_") or selected_id.startswith("report_"):
+                                # Determine action and commodity
+                                if selected_id.startswith("check_"):
+                                    action = "check_price"
+                                    commodity = selected_id.replace("check_", "")
+                                else:
+                                    action = "report_price"
+                                    commodity = selected_id.replace("report_", "")
+
+                                user_action_context[from_number] = action
+
+                                # Commodities with varieties - show variety buttons
+                                if commodity in ["garri", "rice", "beans", "egg"]:
+                                    await send_variety_buttons(from_number, commodity)
+                                else:
+                                    # crayfish, palm_oil - skip to unit selection
+                                    if action == "check_price":
+                                        # For check price, store and show unit buttons
+                                        partial_price_reports[from_number] = {
+                                            "commodity": commodity,
+                                            "action": "check_price",
+                                            "awaiting": "check_unit"
+                                        }
+                                        commodity_display = "Red Oil" if commodity == "palm_oil" else commodity.replace("_", " ").title()
+                                        await send_check_price_unit_buttons(from_number, commodity_display)
+                                    else:
+                                        # For report price, store and show unit list
+                                        partial_price_reports[from_number] = {
+                                            "commodity": commodity,
+                                            "awaiting": "unit"
+                                        }
+                                        await send_unit_list(from_number)
+
                             # Check if it's a unit selection
-                            elif selected_id in ["paint", "half_paint", "cup", "bag", "half_bag", "mudu", "kg", "piece", "other_unit"]:
+                            elif selected_id in ["paint", "half_paint", "bag", "half_bag", "kg", "crate", "other_unit"]:
                                 # Unit selection
                                 if selected_id == "other_unit":
                                     await send_whatsapp_message(from_number, "Type the unit:")
@@ -361,16 +438,18 @@ async def receive_message(request: Request):
                             # Main menu buttons
                             if button_id == "menu_check_price":
                                 user_action_context[from_number] = "check_price"
-                                await send_commodity_buttons(from_number, "check")
+                                await send_commodity_list(from_number, "check")
 
                             elif button_id == "menu_report_price":
                                 # Check contributor status
                                 if is_user_contributor(from_number):
                                     user_action_context[from_number] = "report_price"
-                                    await send_commodity_buttons(from_number, "report")
+                                    await send_commodity_list(from_number, "report")
                                 else:
                                     await send_contributor_onboarding(from_number)
 
+                            elif button_id == "my_orders":
+                                await send_my_orders(from_number)
 
                             # Check price unit selection buttons (Paint, Bag, Half Bag)
                             elif button_id.startswith("check_unit_"):
@@ -544,9 +623,27 @@ async def receive_message(request: Request):
                                 order_id = button_id.replace("vendor_reject_", "")
                                 await handle_vendor_order_response(from_number, order_id, "rejected")
 
+                            # Agent/Contributor buttons
+                            elif button_id.startswith("agent_collected_"):
+                                order_id = button_id.replace("agent_collected_", "")
+                                await handle_agent_collected(from_number, order_id)
+
+                            elif button_id.startswith("agent_handedover_"):
+                                order_id = button_id.replace("agent_handedover_", "")
+                                await handle_agent_handedover(from_number, order_id)
+
+                            # Logistics buttons
+                            elif button_id.startswith("logistics_pickedup_"):
+                                order_id = button_id.replace("logistics_pickedup_", "")
+                                await handle_logistics_pickedup(from_number, order_id)
+
+                            elif button_id.startswith("logistics_delivered_"):
+                                order_id = button_id.replace("logistics_delivered_", "")
+                                await handle_logistics_delivered(from_number, order_id)
+
                             # Variety selection (garri_white, rice_local, etc.)
                             else:
-                                variety_prefixes = ["garri_", "rice_", "beans_"]
+                                variety_prefixes = ["garri_", "rice_", "beans_", "egg_"]
                                 if any(button_id.startswith(prefix) for prefix in variety_prefixes):
                                     # Check/Report flow
                                     response_text = await handle_variety_selection(from_number, button_id)
@@ -789,12 +886,10 @@ async def send_unit_list(to: str):
         units = [
             {"id": "paint", "title": "Paint", "description": "Standard paint bucket"},
             {"id": "half_paint", "title": "Half Paint", "description": "Half paint bucket"},
-            {"id": "cup", "title": "Cup", "description": "Cup measure"},
             {"id": "bag", "title": "Bag", "description": "Full bag (50kg)"},
             {"id": "half_bag", "title": "Half Bag", "description": "Half bag (25kg)"},
-            {"id": "mudu", "title": "Mudu", "description": "Traditional measure"},
             {"id": "kg", "title": "Kg", "description": "Per kilogram"},
-            {"id": "piece", "title": "Piece", "description": "Per piece/unit"},
+            {"id": "crate", "title": "Crate", "description": "Crate (for eggs)"},
             {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
         ]
 
@@ -860,6 +955,10 @@ COMMODITY_VARIETIES = {
         {"id": "beans_oloyin", "title": "Oloyin"},
         {"id": "beans_brown", "title": "Brown"},
         {"id": "beans_iron", "title": "Iron"}
+    ],
+    "egg": [
+        {"id": "egg_jumbo", "title": "Jumbo"},
+        {"id": "egg_small", "title": "Small"}
     ]
 }
 
@@ -934,8 +1033,8 @@ async def send_variety_buttons(to: str, commodity: str):
 async def send_main_menu(to: str, welcome: bool = True):
     """
     Send main menu with action buttons based on user type.
-    Regular users: Check Price, View Cart
-    Verified contributors: Check Price, Report Price
+    Regular users: Check Price, View Cart, My Orders
+    Verified contributors: Check Price, Report Price, My Orders
 
     Args:
         to: Recipient's WhatsApp number
@@ -960,16 +1059,18 @@ async def send_main_menu(to: str, welcome: bool = True):
         is_contributor = is_user_contributor(to)
 
         if is_contributor:
-            # Verified contributors: Check Price + Report Price
+            # Verified contributors: Check Price + Report Price + My Orders
             buttons = [
                 {"type": "reply", "reply": {"id": "menu_check_price", "title": "Check Price"}},
-                {"type": "reply", "reply": {"id": "menu_report_price", "title": "Report Price"}}
+                {"type": "reply", "reply": {"id": "menu_report_price", "title": "Report Price"}},
+                {"type": "reply", "reply": {"id": "my_orders", "title": "My Orders"}}
             ]
         else:
-            # Regular users: Check Price + View Cart
+            # Regular users: Check Price + View Cart + My Orders
             buttons = [
                 {"type": "reply", "reply": {"id": "menu_check_price", "title": "Check Price"}},
-                {"type": "reply", "reply": {"id": "view_cart", "title": "View Cart"}}
+                {"type": "reply", "reply": {"id": "view_cart", "title": "View Cart"}},
+                {"type": "reply", "reply": {"id": "my_orders", "title": "My Orders"}}
             ]
 
         payload = {
@@ -1006,13 +1107,13 @@ async def send_main_menu(to: str, welcome: bool = True):
         return False
 
 
-async def send_commodity_buttons(to: str, action: str):
+async def send_commodity_list(to: str, action: str):
     """
-    Send commodity selection buttons
+    Send commodity selection as interactive list
 
     Args:
         to: Recipient's WhatsApp number
-        action: "check" or "report" - determines button ID prefix
+        action: "check" or "report" - determines list item ID prefix
     """
     try:
         headers = {
@@ -1020,19 +1121,37 @@ async def send_commodity_buttons(to: str, action: str):
             "Content-Type": "application/json"
         }
 
+        # Commodities available for selection
+        commodities = [
+            {"id": f"{action}_garri", "title": "Garri", "description": "White, Yellow, Ijebu"},
+            {"id": f"{action}_rice", "title": "Rice", "description": "Local, Foreign, Ofada"},
+            {"id": f"{action}_beans", "title": "Beans", "description": "Oloyin, Brown, Iron"},
+            {"id": f"{action}_egg", "title": "Egg", "description": "Jumbo, Small"},
+            {"id": f"{action}_crayfish", "title": "Crayfish", "description": "Dried crayfish"},
+            {"id": f"{action}_palm_oil", "title": "Red Oil", "description": "Palm oil"},
+        ]
+
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": to,
             "type": "interactive",
             "interactive": {
-                "type": "button",
-                "body": {"text": "Which commodity?"},
+                "type": "list",
+                "header": {
+                    "type": "text",
+                    "text": "Select Commodity"
+                },
+                "body": {
+                    "text": "Which commodity?"
+                },
                 "action": {
-                    "buttons": [
-                        {"type": "reply", "reply": {"id": f"{action}_garri", "title": "Garri"}},
-                        {"type": "reply", "reply": {"id": f"{action}_rice", "title": "Rice"}},
-                        {"type": "reply", "reply": {"id": f"{action}_beans", "title": "Beans"}}
+                    "button": "Choose Commodity",
+                    "sections": [
+                        {
+                            "title": "Commodities",
+                            "rows": commodities
+                        }
                     ]
                 }
             }
@@ -1047,14 +1166,14 @@ async def send_commodity_buttons(to: str, action: str):
             )
 
             if response.status_code == 200:
-                logger.info(f"✅ Commodity buttons sent to {to} for {action}")
+                logger.info(f"✅ Commodity list sent to {to} for {action}")
                 return True
             else:
-                logger.error(f"❌ Failed to send commodity buttons: {response.status_code} - {response.text}")
+                logger.error(f"❌ Failed to send commodity list: {response.status_code} - {response.text}")
                 return False
 
     except Exception as e:
-        logger.error(f"❌ Error sending commodity buttons: {e}")
+        logger.error(f"❌ Error sending commodity list: {e}")
         return False
 
 
@@ -1563,6 +1682,8 @@ async def send_checkout_confirmation(to: str):
     Args:
         to: Recipient's WhatsApp number
     """
+    from app.config import SERVICE_CHARGE_PERCENT, SERVICE_CHARGE_CAP
+
     try:
         cart_items = get_cart_items(to)
         partial = partial_cart.get(to, {})
@@ -1574,8 +1695,13 @@ async def send_checkout_confirmation(to: str):
 
         # Calculate totals
         subtotal = sum(item["quantity"] * item["unit_price"] for item in cart_items)
+
+        # Calculate service charge (10% capped at 3k, rounded down)
+        service_charge = int(subtotal * SERVICE_CHARGE_PERCENT)
+        service_charge = min(service_charge, SERVICE_CHARGE_CAP)
+
         delivery_fee = DELIVERY_FEE
-        total = subtotal + delivery_fee
+        total = subtotal + service_charge + delivery_fee
 
         # Build summary with detailed item breakdown
         lines = ["*Order Summary*\n", "*Items:*"]
@@ -1593,6 +1719,7 @@ async def send_checkout_confirmation(to: str):
 
         lines.extend([
             f"\n*Subtotal:* {format_price_display(subtotal)}",
+            f"*Service Charge:* {format_price_display(service_charge)}",
             f"*Delivery:* {format_price_display(delivery_fee)}",
             f"*Total:* {format_price_display(total)}",
             f"\n*Deliver to:* {partial.get('delivery_address', 'N/A')}",
@@ -1661,6 +1788,89 @@ async def send_payment_link(to: str, payment_url: str, order_number: str):
         f"Once paid, we'll notify the vendor and arrange delivery."
     )
     await send_whatsapp_message(to, message)
+
+
+async def send_my_orders(to: str):
+    """
+    Send user's orders grouped by ongoing and completed status
+
+    Args:
+        to: Recipient's WhatsApp number
+    """
+    try:
+        orders = get_user_orders(to, limit=10)
+
+        if not orders:
+            await send_whatsapp_message(
+                to,
+                "You don't have any orders yet.\n\n"
+                "Check prices and add items to your cart to place an order!"
+            )
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Define status categories
+        ongoing_statuses = ["pending_payment", "paid_awaiting_vendor", "vendor_confirmed", "preparing", "out_for_delivery"]
+        completed_statuses = ["delivered", "vendor_rejected", "cancelled"]
+
+        # Status display names with icons
+        status_display = {
+            "pending_payment": "Awaiting payment 💳",
+            "paid_awaiting_vendor": "Paid, awaiting vendor ⏳",
+            "vendor_confirmed": "Vendor confirmed ✅",
+            "preparing": "Preparing 👨‍🍳",
+            "out_for_delivery": "Out for delivery 🚚",
+            "delivered": "Delivered ✅",
+            "vendor_rejected": "Rejected (refund pending) ❌",
+            "cancelled": "Cancelled ❌"
+        }
+
+        # Separate orders
+        ongoing = [o for o in orders if o.get("status") in ongoing_statuses]
+        completed = [o for o in orders if o.get("status") in completed_statuses]
+
+        lines = ["*My Orders*\n"]
+
+        # Ongoing orders
+        if ongoing:
+            lines.append("📦 *Ongoing*")
+            for order in ongoing:
+                order_num = order.get("order_number", "N/A")
+                status = status_display.get(order.get("status"), order.get("status", "Unknown"))
+                total = order.get("total", 0)
+                items = order.get("items", [])
+                item_summary = ", ".join([f"{item['commodity'].replace('_', ' ').title()}" for item in items[:2]])
+                if len(items) > 2:
+                    item_summary += f" +{len(items) - 2} more"
+                lines.append(f"• *#{order_num}*")
+                lines.append(f"  {item_summary}")
+                lines.append(f"  {status}")
+                lines.append(f"  Total: {format_price_display(total)}")
+                lines.append("")
+        else:
+            lines.append("📦 *Ongoing*")
+            lines.append("No ongoing orders\n")
+
+        # Completed orders
+        if completed:
+            lines.append("✅ *Completed*")
+            for order in completed[:5]:  # Show max 5 completed
+                order_num = order.get("order_number", "N/A")
+                status = status_display.get(order.get("status"), order.get("status", "Unknown"))
+                total = order.get("total", 0)
+                lines.append(f"• #{order_num} - {status} - {format_price_display(total)}")
+        else:
+            lines.append("✅ *Completed*")
+            lines.append("No completed orders yet")
+
+        message = "\n".join(lines)
+        await send_whatsapp_message(to, message)
+        await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"❌ Error sending my orders: {e}")
+        await send_whatsapp_message(to, "Couldn't load your orders. Please try again.")
+        await send_main_menu(to, welcome=False)
 
 
 async def send_vendor_order_notification(vendor_phone: str, order: dict):
@@ -1764,20 +1974,33 @@ async def handle_vendor_order_response(vendor_phone: str, order_id: str, respons
         # Update order
         update_order_status(order_id, "vendor_confirmed")
 
-        # Notify vendor
+        # Notify vendor with packing instructions
         await send_whatsapp_message(
             vendor_phone,
             f"Order #{order['order_number']} confirmed!\n\n"
-            f"*Deliver to:* {order['delivery_address']}\n"
-            f"*Contact:* {order['contact_phone']}"
+            f"Please pack the items and write *{order['order_number']}* on the package.\n\n"
+            f"Our agent will come to collect shortly."
         )
 
         # Notify buyer
         await send_whatsapp_message(
             buyer_phone,
             f"Great news! Your order #{order['order_number']} is confirmed!\n\n"
-            f"The vendor is preparing your items for delivery."
+            f"The vendor is preparing your items."
         )
+
+        # Notify contributor/agent to pick up
+        agent = get_pickup_agent_for_market("ogbete_main")
+        if agent:
+            await send_contributor_pickup_notification(agent["whatsapp_number"], order, order.get("vendor_id"))
+        else:
+            # Notify admin if no agent available
+            await send_whatsapp_message(
+                ADMIN_WHATSAPP_NUMBER,
+                f"*NO PICKUP AGENT*\n\n"
+                f"Order #{order['order_number']} confirmed but no agent available.\n"
+                f"Please assign someone to pick up."
+            )
 
     else:  # rejected
         # Update order
@@ -1804,6 +2027,414 @@ async def handle_vendor_order_response(vendor_phone: str, order_id: str, respons
             f"Amount: {order.get('total', 0):,.0f}\n"
             f"Reference: {order.get('payment_reference', 'N/A')}"
         )
+
+
+async def handle_agent_collected(agent_phone: str, order_id: str):
+    """
+    Handle agent clicking COLLECTED button
+
+    Args:
+        agent_phone: Agent's WhatsApp number
+        order_id: Order ID
+    """
+    order = get_order_by_id(order_id)
+    if not order:
+        await send_whatsapp_message(agent_phone, "Order not found.")
+        return
+
+    if order["status"] != "vendor_confirmed":
+        await send_whatsapp_message(
+            agent_phone,
+            f"Order #{order['order_number']} is not ready for collection."
+        )
+        return
+
+    # Update order status
+    update_order_status(order_id, "agent_collecting")
+
+    # Notify agent with handover prompt
+    await send_contributor_handover_prompt(agent_phone, order)
+
+    # Notify customer
+    await send_whatsapp_message(
+        order["whatsapp_number"],
+        f"📦 Your order #{order['order_number']} has been picked up from the vendor!"
+    )
+
+
+async def handle_agent_handedover(agent_phone: str, order_id: str):
+    """
+    Handle agent clicking HANDED OVER button
+
+    Args:
+        agent_phone: Agent's WhatsApp number
+        order_id: Order ID
+    """
+    order = get_order_by_id(order_id)
+    if not order:
+        await send_whatsapp_message(agent_phone, "Order not found.")
+        return
+
+    if order["status"] != "agent_collecting":
+        await send_whatsapp_message(
+            agent_phone,
+            f"Order #{order['order_number']} status has changed."
+        )
+        return
+
+    # Update order status
+    update_order_status(order_id, "handed_to_logistics")
+
+    # Confirm to agent
+    await send_whatsapp_message(
+        agent_phone,
+        f"✅ Order #{order['order_number']} handed to logistics."
+    )
+
+    # Notify logistics
+    logistics = get_logistics_for_market("ogbete_main")
+    if logistics:
+        await send_logistics_delivery_notification(logistics["whatsapp_number"], order)
+    else:
+        # Notify admin if no logistics available
+        await send_whatsapp_message(
+            ADMIN_WHATSAPP_NUMBER,
+            f"*NO LOGISTICS PARTNER*\n\n"
+            f"Order #{order['order_number']} handed over but no logistics assigned."
+        )
+
+
+async def handle_logistics_pickedup(logistics_phone: str, order_id: str):
+    """
+    Handle logistics clicking PICKED UP button
+
+    Args:
+        logistics_phone: Logistics partner's WhatsApp number
+        order_id: Order ID
+    """
+    order = get_order_by_id(order_id)
+    if not order:
+        await send_whatsapp_message(logistics_phone, "Order not found.")
+        return
+
+    if order["status"] != "handed_to_logistics":
+        await send_whatsapp_message(
+            logistics_phone,
+            f"Order #{order['order_number']} status has changed."
+        )
+        return
+
+    # Update order status
+    update_order_status(order_id, "out_for_delivery")
+
+    # Send delivered prompt to logistics
+    await send_logistics_delivered_prompt(logistics_phone, order)
+
+    # Notify customer
+    await send_whatsapp_message(
+        order["whatsapp_number"],
+        f"🚚 Your order #{order['order_number']} is on the way!\n\n"
+        f"Our delivery partner will arrive soon."
+    )
+
+
+async def handle_logistics_delivered(logistics_phone: str, order_id: str):
+    """
+    Handle logistics clicking DELIVERED button
+
+    Args:
+        logistics_phone: Logistics partner's WhatsApp number
+        order_id: Order ID
+    """
+    order = get_order_by_id(order_id)
+    if not order:
+        await send_whatsapp_message(logistics_phone, "Order not found.")
+        return
+
+    if order["status"] != "out_for_delivery":
+        await send_whatsapp_message(
+            logistics_phone,
+            f"Order #{order['order_number']} status has changed."
+        )
+        return
+
+    # Update order status
+    update_order_status(order_id, "delivered")
+
+    # Confirm to logistics
+    await send_whatsapp_message(
+        logistics_phone,
+        f"✅ Order #{order['order_number']} marked as delivered. Thank you!"
+    )
+
+    # Notify customer
+    await send_whatsapp_message(
+        order["whatsapp_number"],
+        f"✅ Your order #{order['order_number']} has been delivered!\n\n"
+        f"Thank you for shopping with PriceDeck."
+    )
+    await send_main_menu(order["whatsapp_number"], welcome=False)
+
+
+# =====================================================
+# CONTRIBUTOR/AGENT NOTIFICATIONS
+# =====================================================
+
+async def send_contributor_pickup_notification(agent_phone: str, order: dict, vendor_id: str = None):
+    """
+    Notify contributor to pick up order from vendor
+
+    Args:
+        agent_phone: Contributor's WhatsApp number
+        order: Order data
+        vendor_id: Vendor ID for location details
+    """
+    try:
+        items = order.get("items", [])
+        items_text = "\n".join([
+            f"- {item['commodity'].replace('_', ' ').title()} x{item['quantity']}"
+            for item in items
+        ])
+
+        # Get vendor location details
+        vendor_info = ""
+        if vendor_id:
+            vendor = get_vendor_with_location(vendor_id)
+            if vendor:
+                vendor_info = f"*Vendor:* {vendor.get('business_name', 'N/A')}\n"
+                vendor_info += f"*Phone:* {vendor.get('whatsapp_number', 'N/A')}\n"
+                if vendor.get('section'):
+                    vendor_info += f"*Section:* {vendor.get('section')}\n"
+                if vendor.get('shop_location'):
+                    vendor_info += f"*Location:* {vendor.get('shop_location')}\n"
+                if vendor.get('landmark'):
+                    vendor_info += f"*Landmark:* {vendor.get('landmark')}\n"
+
+        body_text = (
+            f"📦 *Pickup #{order['order_number']}*\n\n"
+            f"{vendor_info}\n"
+            f"*Items:*\n{items_text}\n\n"
+            f"⚠️ Verify package has order number written on it\n\n"
+            f"Collect and hand to logistics."
+        )
+
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": agent_phone,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": body_text},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": f"agent_collected_{order['id']}", "title": "COLLECTED"}}
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Pickup notification sent to agent {agent_phone} for order {order['order_number']}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send pickup notification: {response.status_code} - {response.text}")
+                return False
+
+    except Exception as e:
+        logger.error(f"❌ Error sending pickup notification: {e}")
+        return False
+
+
+async def send_contributor_handover_prompt(agent_phone: str, order: dict):
+    """
+    Prompt contributor to hand over to logistics
+
+    Args:
+        agent_phone: Contributor's WhatsApp number
+        order: Order data
+    """
+    try:
+        body_text = (
+            f"🤝 *Handover #{order['order_number']}*\n\n"
+            f"*Deliver to:* {order.get('delivery_address', 'N/A')}\n"
+            f"*Customer:* {order.get('contact_phone', 'N/A')}\n\n"
+            f"Hand to logistics and say: *\"{order['order_number']}\"*"
+        )
+
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": agent_phone,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": body_text},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": f"agent_handedover_{order['id']}", "title": "HANDED OVER"}}
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Handover prompt sent to agent {agent_phone}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send handover prompt: {response.status_code}")
+                return False
+
+    except Exception as e:
+        logger.error(f"❌ Error sending handover prompt: {e}")
+        return False
+
+
+async def send_logistics_delivery_notification(logistics_phone: str, order: dict):
+    """
+    Notify logistics to deliver order (NO PRICE shown)
+
+    Args:
+        logistics_phone: Logistics partner's WhatsApp number
+        order: Order data
+    """
+    try:
+        items = order.get("items", [])
+        items_text = ", ".join([
+            f"{item['commodity'].replace('_', ' ').title()} x{item['quantity']}"
+            for item in items
+        ])
+
+        # NO PRICE - only items and delivery info
+        body_text = (
+            f"🚚 *Delivery #{order['order_number']}*\n\n"
+            f"*Items:* {items_text}\n\n"
+            f"*Deliver to:* {order.get('delivery_address', 'N/A')}\n"
+            f"*Customer:* {order.get('contact_phone', 'N/A')}"
+        )
+
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": logistics_phone,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": body_text},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": f"logistics_pickedup_{order['id']}", "title": "PICKED UP"}}
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Delivery notification sent to logistics {logistics_phone}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send logistics notification: {response.status_code}")
+                return False
+
+    except Exception as e:
+        logger.error(f"❌ Error sending logistics notification: {e}")
+        return False
+
+
+async def send_logistics_delivered_prompt(logistics_phone: str, order: dict):
+    """
+    Prompt logistics to confirm delivery
+
+    Args:
+        logistics_phone: Logistics partner's WhatsApp number
+        order: Order data
+    """
+    try:
+        body_text = (
+            f"🚚 *In Transit #{order['order_number']}*\n\n"
+            f"*Deliver to:* {order.get('delivery_address', 'N/A')}\n"
+            f"*Customer:* {order.get('contact_phone', 'N/A')}\n\n"
+            f"Click when delivered."
+        )
+
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": logistics_phone,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": body_text},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": f"logistics_delivered_{order['id']}", "title": "DELIVERED"}}
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Delivered prompt sent to logistics {logistics_phone}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send delivered prompt: {response.status_code}")
+                return False
+
+    except Exception as e:
+        logger.error(f"❌ Error sending delivered prompt: {e}")
+        return False
 
 
 # =====================================================

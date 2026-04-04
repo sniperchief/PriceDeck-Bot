@@ -940,6 +940,7 @@ def create_order(
     vendor_id: str,
     items: List[Dict],
     subtotal: float,
+    service_charge: float,
     delivery_fee: float,
     total: float,
     delivery_address: str,
@@ -953,6 +954,7 @@ def create_order(
         vendor_id: Vendor ID
         items: List of cart items
         subtotal: Items total
+        service_charge: Service charge (10% capped at 3k)
         delivery_fee: Delivery charge
         total: Grand total
         delivery_address: Delivery address
@@ -968,6 +970,7 @@ def create_order(
             "vendor_id": vendor_id,
             "items": items,
             "subtotal": subtotal,
+            "service_charge": service_charge,
             "delivery_fee": delivery_fee,
             "total": total,
             "delivery_address": delivery_address,
@@ -1160,3 +1163,118 @@ def get_user_orders(whatsapp_number: str, limit: int = 10) -> List[Dict[str, Any
     except Exception as e:
         logger.error(f"Error getting user orders: {e}")
         return []
+
+
+# =====================================================
+# LOGISTICS PARTNERS
+# =====================================================
+
+def get_logistics_for_market(market: str = "ogbete_main") -> Optional[Dict[str, Any]]:
+    """
+    Get active logistics partner for a market
+
+    Args:
+        market: Market slug
+
+    Returns:
+        Logistics partner record or None
+    """
+    try:
+        response = supabase.table("logistics_partners")\
+            .select("*")\
+            .eq("market", market)\
+            .eq("is_active", True)\
+            .limit(1)\
+            .execute()
+
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+
+    except Exception as e:
+        logger.error(f"Error getting logistics partner: {e}")
+        return None
+
+
+# =====================================================
+# PICKUP AGENTS (Contributors)
+# =====================================================
+
+def get_pickup_agent_for_market(market: str = "ogbete_main") -> Optional[Dict[str, Any]]:
+    """
+    Get active pickup agent (contributor) for a market
+
+    Args:
+        market: Market slug
+
+    Returns:
+        User record of pickup agent or None
+    """
+    try:
+        response = supabase.table("users")\
+            .select("*")\
+            .eq("is_pickup_agent", True)\
+            .eq("agent_market", market)\
+            .limit(1)\
+            .execute()
+
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+
+    except Exception as e:
+        logger.error(f"Error getting pickup agent: {e}")
+        return None
+
+
+def set_user_as_pickup_agent(whatsapp_number: str, market: str = "ogbete_main") -> bool:
+    """
+    Set a user as pickup agent for a market
+
+    Args:
+        whatsapp_number: User's phone
+        market: Market slug
+
+    Returns:
+        True if successful
+    """
+    try:
+        response = supabase.table("users")\
+            .update({
+                "is_pickup_agent": True,
+                "agent_market": market
+            })\
+            .eq("whatsapp_number", whatsapp_number)\
+            .execute()
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error setting pickup agent: {e}")
+        return False
+
+
+def get_vendor_with_location(vendor_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get vendor with location details
+
+    Args:
+        vendor_id: Vendor ID
+
+    Returns:
+        Vendor record with location fields
+    """
+    try:
+        response = supabase.table("vendors")\
+            .select("*")\
+            .eq("id", vendor_id)\
+            .limit(1)\
+            .execute()
+
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+
+    except Exception as e:
+        logger.error(f"Error getting vendor: {e}")
+        return None

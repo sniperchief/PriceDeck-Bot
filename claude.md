@@ -23,17 +23,17 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 ## Core Features
 
 1. **Price Checking** - Users ask "How much is rice?" to get current market prices
-2. **Price Reporting** - Verified contributors submit commodity prices from specific markets
+2. **Price Reporting** - Verified contributors submit commodity prices (Ogbete auto-selected)
 3. **Shopping Cart** - Users can add items to cart and checkout with Paystack payment (Ogbete Market only)
 4. **Contributor System** - Users with 10+ verified submissions become verified contributors
 
 ## Supported Data
 
-**Commodities**: Garri (white, yellow, ijebu), Rice (local, foreign, ofada), Beans (oloyin, brown, iron), tomatoes, pepper, palm oil, yam, plantain, beef, chicken, fish, eggs, onions, crayfish, cement
+**Commodities**: Garri (white, yellow, ijebu), Rice (local, foreign, ofada), Beans (oloyin, brown, iron), Egg (jumbo, small), Crayfish, Red Oil (palm oil)
 
-**Markets (Enugu)**: Ogbete Main Market, Abakpa Market, Mammy Market, Garriki Market, Obiagu Market, New Market, Mayor Market, Kenyetta Market, Orie Emene
+**Markets (Enugu)**: Ogbete Main Market (only market currently active)
 
-**Units**: paint, half_paint, cup, bag, half_bag, mudu, kg, piece, etc.
+**Units**: paint, half_paint, bag, half_bag, kg, crate
 
 ## Database Tables
 
@@ -55,7 +55,6 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 
 Used in `claude_tasks.py` to trigger UI flows in `main.py`:
 - `__SELECT_UNIT__` - Show unit selection list
-- `__SELECT_MARKET__` - Show market selection list
 - `__CONFIRM_PRICE__` - Show confirmation buttons
 - `__ADD_TO_CART__` - Show add to cart button
 - `__VIEW_CART__` - Show cart with checkout options
