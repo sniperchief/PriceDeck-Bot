@@ -1257,7 +1257,7 @@ async def handle_checkout_confirm(user_phone: str) -> str:
             if user_phone in user_action_context:
                 del user_action_context[user_phone]
 
-            return f"__PAYMENT_LINK__:{payment_result['data']['authorization_url']}:{order['order_number']}"
+            return f"__PAYMENT_LINK__|{payment_result['data']['authorization_url']}|{order['order_number']}"
         else:
             logger.error(f"Paystack init failed: {payment_result}")
             return "Payment initialization failed. Please try again.\n\n__AFTER_ACTION__"

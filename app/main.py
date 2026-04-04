@@ -243,9 +243,9 @@ async def receive_message(request: Request):
                             await send_phone_selection_buttons(from_number)
                         elif response_text == "__CHECKOUT_CONFIRM__":
                             await send_checkout_confirmation(from_number)
-                        elif response_text.startswith("__PAYMENT_LINK__:"):
-                            # Format: __PAYMENT_LINK__:url:order_number
-                            parts = response_text.split(":", 2)
+                        elif response_text.startswith("__PAYMENT_LINK__|"):
+                            # Format: __PAYMENT_LINK__|url|order_number
+                            parts = response_text.split("|")
                             if len(parts) >= 3:
                                 url = parts[1]
                                 order_number = parts[2]
@@ -591,8 +591,8 @@ async def receive_message(request: Request):
                                     await send_main_menu(from_number, welcome=False)
                                 else:
                                     response_text = await handle_checkout_confirm(from_number)
-                                    if response_text.startswith("__PAYMENT_LINK__:"):
-                                        parts = response_text.split(":", 2)
+                                    if response_text.startswith("__PAYMENT_LINK__|"):
+                                        parts = response_text.split("|")
                                         if len(parts) >= 3:
                                             url = parts[1]
                                             order_number = parts[2]
