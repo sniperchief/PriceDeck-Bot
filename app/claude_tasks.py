@@ -101,7 +101,13 @@ YOUR JOB: Extract data from user messages and return JSON. System handles respon
 
 MARKETS: ogbete_main (Ogbete Market is the only supported market)
 COMMODITIES: garri, rice, beans, egg, crayfish, palm_oil (red oil)
-UNITS: paint, half_paint, bag, half_bag, kg, crate
+UNITS: paint, half_paint, bag, half_bag, kg, crate, half_crate, litre, portion
+
+COMMODITY-SPECIFIC UNITS:
+- Palm oil (red oil): litre
+- Crayfish: paint, half_paint, portion
+- Egg: crate, half_crate
+- Garri, Rice, Beans: paint, half_paint, bag, half_bag, kg
 
 COMMODITY VARIETIES (use these exact names when user specifies type):
 - Garri: garri_white, garri_yellow, garri_ijebu
@@ -431,7 +437,7 @@ async def handle_variety_selection(user_phone: str, variety_id: str) -> str:
             "awaiting": "check_unit"
         }
         commodity_display = clean_name(variety_id)
-        return f"__CHECK_PRICE_UNIT__:{commodity_display}"
+        return f"__CHECK_PRICE_UNIT__:{variety_id}|{commodity_display}"
 
     # REPORT PRICE FLOW - continue to unit selection
     partial = partial_price_reports.get(user_phone)

@@ -216,7 +216,10 @@ async def receive_message(request: Request):
                             commodity = response_text.split(":")[1]
                             await send_variety_buttons(from_number, commodity)
                         elif response_text == "__SELECT_UNIT__":
-                            await send_unit_list(from_number)
+                            # Get commodity from partial data for commodity-specific units
+                            partial = partial_price_reports.get(from_number, {})
+                            commodity = partial.get("commodity")
+                            await send_unit_list(from_number, commodity)
                         elif response_text == "__SELECT_MARKET__":
                             await send_market_list(from_number, MARKETS_CACHE)
                         elif response_text.startswith("__ADD_TO_CART__:"):
@@ -251,9 +254,12 @@ async def receive_message(request: Request):
                                 order_number = parts[2]
                                 await send_payment_link(from_number, url, order_number)
                         elif response_text.startswith("__CHECK_PRICE_UNIT__:"):
-                            # Format: __CHECK_PRICE_UNIT__:commodity_display
-                            commodity_display = response_text.split(":")[1]
-                            await send_check_price_unit_buttons(from_number, commodity_display)
+                            # Format: __CHECK_PRICE_UNIT__:commodity|commodity_display
+                            marker_data = response_text.split(":")[1]
+                            parts = marker_data.split("|")
+                            commodity = parts[0]
+                            commodity_display = parts[1] if len(parts) > 1 else commodity
+                            await send_check_price_unit_buttons(from_number, commodity_display, commodity)
                         elif response_text == "__MY_ORDERS__":
                             await send_my_orders(from_number)
                         elif response_text == "__HELP__":
@@ -389,17 +395,17 @@ async def receive_message(request: Request):
                                             "awaiting": "check_unit"
                                         }
                                         commodity_display = "Red Oil" if commodity == "palm_oil" else commodity.replace("_", " ").title()
-                                        await send_check_price_unit_buttons(from_number, commodity_display)
+                                        await send_check_price_unit_buttons(from_number, commodity_display, commodity)
                                     else:
                                         # For report price, store and show unit list
                                         partial_price_reports[from_number] = {
                                             "commodity": commodity,
                                             "awaiting": "unit"
                                         }
-                                        await send_unit_list(from_number)
+                                        await send_unit_list(from_number, commodity)
 
                             # Check if it's a unit selection
-                            elif selected_id in ["paint", "half_paint", "bag", "half_bag", "kg", "crate", "other_unit"]:
+                            elif selected_id in ["paint", "half_paint", "bag", "half_bag", "kg", "crate", "half_crate", "litre", "portion", "other_unit"]:
                                 # Unit selection
                                 if selected_id == "other_unit":
                                     await send_whatsapp_message(from_number, "Type the unit:")
@@ -649,12 +655,19 @@ async def receive_message(request: Request):
                                     response_text = await handle_variety_selection(from_number, button_id)
                                     # Check what's next based on response
                                     if response_text == "__SELECT_UNIT__":
-                                        await send_unit_list(from_number)
+                                        # Get commodity from partial data for commodity-specific units
+                                        partial = partial_price_reports.get(from_number, {})
+                                        commodity = partial.get("commodity")
+                                        await send_unit_list(from_number, commodity)
                                     elif response_text == "__SELECT_MARKET__":
                                         await send_market_list(from_number, MARKETS_CACHE)
                                     elif response_text.startswith("__CHECK_PRICE_UNIT__:"):
-                                        commodity_display = response_text.split(":")[1]
-                                        await send_check_price_unit_buttons(from_number, commodity_display)
+                                        # Format: __CHECK_PRICE_UNIT__:commodity|commodity_display
+                                        marker_data = response_text.split(":")[1]
+                                        parts = marker_data.split("|")
+                                        commodity = parts[0]
+                                        commodity_display = parts[1] if len(parts) > 1 else commodity
+                                        await send_check_price_unit_buttons(from_number, commodity_display, commodity)
                                     elif "__ADD_TO_CART__:" in response_text:
                                         # Format: message\n\n__ADD_TO_CART__:commodity:price:unit
                                         parts = response_text.split("__ADD_TO_CART__:")
@@ -869,12 +882,14 @@ async def send_market_list(to: str, markets: list):
         return False
 
 
-async def send_unit_list(to: str):
+async def send_unit_list(to: str, commodity: str = None):
     """
-    Send an interactive list of units/measurements to select from
+    Send an interactive list of units/measurements to select from.
+    Units are commodity-specific when commodity is provided.
 
     Args:
         to: Recipient's WhatsApp number
+        commodity: Optional commodity slug for commodity-specific units
     """
     try:
         headers = {
@@ -882,16 +897,38 @@ async def send_unit_list(to: str):
             "Content-Type": "application/json"
         }
 
-        # Common units in Nigerian markets
-        units = [
-            {"id": "paint", "title": "Paint", "description": "Standard paint bucket"},
-            {"id": "half_paint", "title": "Half Paint", "description": "Half paint bucket"},
-            {"id": "bag", "title": "Bag", "description": "Full bag (50kg)"},
-            {"id": "half_bag", "title": "Half Bag", "description": "Half bag (25kg)"},
-            {"id": "kg", "title": "Kg", "description": "Per kilogram"},
-            {"id": "crate", "title": "Crate", "description": "Crate (for eggs)"},
-            {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
-        ]
+        # Determine base commodity for unit selection
+        base_commodity = commodity.split("_")[0] if commodity else ""
+
+        # Commodity-specific units
+        if base_commodity == "palm" or commodity == "palm_oil":
+            units = [
+                {"id": "litre", "title": "Litre", "description": "Price per litre"},
+                {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
+            ]
+        elif base_commodity == "crayfish" or commodity == "crayfish":
+            units = [
+                {"id": "paint", "title": "Paint", "description": "Standard paint bucket"},
+                {"id": "half_paint", "title": "Half Paint", "description": "Half paint bucket"},
+                {"id": "portion", "title": "Portion", "description": "Single portion/serving"},
+                {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
+            ]
+        elif base_commodity == "egg" or commodity in ["egg", "egg_jumbo", "egg_small"]:
+            units = [
+                {"id": "crate", "title": "Crate", "description": "Full crate"},
+                {"id": "half_crate", "title": "Half Crate", "description": "Half crate"},
+                {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
+            ]
+        else:
+            # Default units for garri, rice, beans
+            units = [
+                {"id": "paint", "title": "Paint", "description": "Standard paint bucket"},
+                {"id": "half_paint", "title": "Half Paint", "description": "Half paint bucket"},
+                {"id": "bag", "title": "Bag", "description": "Full bag (50kg)"},
+                {"id": "half_bag", "title": "Half Bag", "description": "Half bag (25kg)"},
+                {"id": "kg", "title": "Kg", "description": "Per kilogram"},
+                {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
+            ]
 
         payload = {
             "messaging_product": "whatsapp",
@@ -1188,19 +1225,48 @@ async def send_contributor_onboarding(to: str):
     await send_whatsapp_message(to, message)
 
 
-async def send_check_price_unit_buttons(to: str, commodity_display: str):
+async def send_check_price_unit_buttons(to: str, commodity_display: str, commodity: str = None):
     """
-    Send unit selection buttons for price checking (Paint, Bag, Half Bag)
+    Send unit selection buttons for price checking.
+    Units are commodity-specific.
 
     Args:
         to: Recipient's WhatsApp number
         commodity_display: Display name of commodity (e.g., "White Garri")
+        commodity: Commodity slug (e.g., "garri_white", "palm_oil")
     """
     try:
         headers = {
             "Authorization": f"Bearer {WHATSAPP_TOKEN}",
             "Content-Type": "application/json"
         }
+
+        # Determine base commodity for unit selection
+        base_commodity = commodity.split("_")[0] if commodity else ""
+
+        # Commodity-specific units
+        if base_commodity == "palm" or commodity == "palm_oil":
+            buttons = [
+                {"type": "reply", "reply": {"id": "check_unit_litre", "title": "Litre"}}
+            ]
+        elif base_commodity == "crayfish" or commodity == "crayfish":
+            buttons = [
+                {"type": "reply", "reply": {"id": "check_unit_paint", "title": "Paint"}},
+                {"type": "reply", "reply": {"id": "check_unit_half_paint", "title": "Half Paint"}},
+                {"type": "reply", "reply": {"id": "check_unit_portion", "title": "Portion"}}
+            ]
+        elif base_commodity == "egg" or commodity in ["egg", "egg_jumbo", "egg_small"]:
+            buttons = [
+                {"type": "reply", "reply": {"id": "check_unit_crate", "title": "Crate"}},
+                {"type": "reply", "reply": {"id": "check_unit_half_crate", "title": "Half Crate"}}
+            ]
+        else:
+            # Default units for garri, rice, beans
+            buttons = [
+                {"type": "reply", "reply": {"id": "check_unit_paint", "title": "Paint"}},
+                {"type": "reply", "reply": {"id": "check_unit_bag", "title": "Bag"}},
+                {"type": "reply", "reply": {"id": "check_unit_half_bag", "title": "Half Bag"}}
+            ]
 
         payload = {
             "messaging_product": "whatsapp",
@@ -1211,11 +1277,7 @@ async def send_check_price_unit_buttons(to: str, commodity_display: str):
                 "type": "button",
                 "body": {"text": f"What unit for {commodity_display}?"},
                 "action": {
-                    "buttons": [
-                        {"type": "reply", "reply": {"id": "check_unit_paint", "title": "Paint"}},
-                        {"type": "reply", "reply": {"id": "check_unit_bag", "title": "Bag"}},
-                        {"type": "reply", "reply": {"id": "check_unit_half_bag", "title": "Half Bag"}}
-                    ]
+                    "buttons": buttons
                 }
             }
         }
