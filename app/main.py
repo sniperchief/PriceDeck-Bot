@@ -707,6 +707,9 @@ def is_market_open() -> bool:
     Returns:
         True if market is open, False otherwise
     """
+    # TODO: Remove this line after testing - allows ordering anytime
+    return True
+
     try:
         nigeria_tz = ZoneInfo('Africa/Lagos')
         now = datetime.now(nigeria_tz)
