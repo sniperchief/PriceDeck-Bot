@@ -434,6 +434,92 @@ def get_prices_by_commodity_and_unit(commodity: str, unit: str, city: str = "enu
         return []
 
 
+def get_prices_for_commodity_all_units(commodity: str, units: List[str], market: str = "ogbete", city: str = "enugu") -> Dict[str, Dict[str, Any]]:
+    """
+    Get latest prices for a commodity across multiple units at a specific market.
+    Used for showing all unit prices at once (e.g., crayfish paint, half_paint, portion).
+
+    Args:
+        commodity: Commodity name (e.g., "crayfish", "garri_white")
+        units: List of units to fetch (e.g., ["paint", "half_paint", "portion"])
+        market: Market slug (default: "ogbete")
+        city: City (default: "enugu")
+
+    Returns:
+        Dict mapping unit to price data: {"paint": {"price": 4000, ...}, ...}
+    """
+    try:
+        result = {}
+
+        for unit in units:
+            response = supabase.table("price_reports")\
+                .select("*")\
+                .eq("commodity", commodity)\
+                .eq("unit", unit)\
+                .eq("market", market)\
+                .eq("city", city)\
+                .eq("is_flagged", False)\
+                .order("reported_at", desc=True)\
+                .limit(1)\
+                .execute()
+
+            if response.data:
+                result[unit] = {
+                    "price": response.data[0]["price"],
+                    "unit": unit,
+                    "reported_at": response.data[0]["reported_at"]
+                }
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting prices for multiple units: {e}")
+        return {}
+
+
+def get_prices_for_varieties_with_unit(varieties: List[str], unit: str, market: str = "ogbete", city: str = "enugu") -> Dict[str, Dict[str, Any]]:
+    """
+    Get latest prices for multiple varieties with a specific unit at a market.
+    Used for eggs (show jumbo and small prices for crate or half_crate).
+
+    Args:
+        varieties: List of variety names (e.g., ["egg_jumbo", "egg_small"])
+        unit: Unit type (e.g., "crate")
+        market: Market slug (default: "ogbete")
+        city: City (default: "enugu")
+
+    Returns:
+        Dict mapping variety to price data: {"egg_jumbo": {"price": 6500, ...}, ...}
+    """
+    try:
+        result = {}
+
+        for variety in varieties:
+            response = supabase.table("price_reports")\
+                .select("*")\
+                .eq("commodity", variety)\
+                .eq("unit", unit)\
+                .eq("market", market)\
+                .eq("city", city)\
+                .eq("is_flagged", False)\
+                .order("reported_at", desc=True)\
+                .limit(1)\
+                .execute()
+
+            if response.data:
+                result[variety] = {
+                    "price": response.data[0]["price"],
+                    "unit": unit,
+                    "reported_at": response.data[0]["reported_at"]
+                }
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting prices for varieties: {e}")
+        return {}
+
+
 def get_recent_prices_for_anomaly_check(commodity: str, city: str = "enugu", limit: int = 5) -> List[Dict[str, Any]]:
     """
     Get recent prices for a commodity to check for anomalies

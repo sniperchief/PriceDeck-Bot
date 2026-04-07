@@ -382,22 +382,39 @@ async def receive_message(request: Request):
 
                                 user_action_context[from_number] = action
 
-                                # Commodities with varieties - show variety buttons
-                                if commodity in ["garri", "rice", "beans", "egg"]:
-                                    await send_variety_buttons(from_number, commodity)
-                                else:
-                                    # crayfish, palm_oil - skip to unit selection
-                                    if action == "check_price":
-                                        # For check price, store and show unit buttons
+                                # Handle CHECK PRICE flow with optimized UX
+                                if action == "check_price":
+                                    if commodity == "palm_oil":
+                                        # Palm oil: Skip unit selection, show price immediately
+                                        await send_palm_oil_price(from_number)
+                                    elif commodity == "crayfish":
+                                        # Crayfish: Show all unit prices at once
+                                        await send_crayfish_prices(from_number)
+                                    elif commodity == "egg":
+                                        # Egg: Show unit selection (crate/half_crate) first
+                                        partial_price_reports[from_number] = {
+                                            "commodity": commodity,
+                                            "action": "check_price",
+                                            "awaiting": "egg_unit"
+                                        }
+                                        await send_egg_unit_buttons(from_number)
+                                    elif commodity in ["garri", "rice", "beans"]:
+                                        # These have varieties - show variety buttons
+                                        await send_variety_buttons(from_number, commodity)
+                                    else:
+                                        # Default flow
                                         partial_price_reports[from_number] = {
                                             "commodity": commodity,
                                             "action": "check_price",
                                             "awaiting": "check_unit"
                                         }
-                                        commodity_display = "Red Oil" if commodity == "palm_oil" else commodity.replace("_", " ").title()
+                                        commodity_display = commodity.replace("_", " ").title()
                                         await send_check_price_unit_buttons(from_number, commodity_display, commodity)
+                                else:
+                                    # REPORT PRICE flow - unchanged
+                                    if commodity in ["garri", "rice", "beans", "egg"]:
+                                        await send_variety_buttons(from_number, commodity)
                                     else:
-                                        # For report price, store and show unit list
                                         partial_price_reports[from_number] = {
                                             "commodity": commodity,
                                             "awaiting": "unit"
@@ -419,6 +436,26 @@ async def receive_message(request: Request):
                                     else:
                                         # Price prompt: "What's the price per paint?"
                                         await send_whatsapp_message(from_number, response_text)
+
+                            # Cart add from interactive list (new flow)
+                            elif selected_id.startswith("cart_add|"):
+                                # Format: cart_add|{commodity}|{unit}|{price}
+                                parts = selected_id.split("|")
+                                if len(parts) >= 4:
+                                    commodity = parts[1]
+                                    unit = parts[2]
+                                    price = float(parts[3])
+                                    response_text = await handle_add_to_cart(from_number, commodity, unit, price)
+                                    if "__AFTER_ACTION__" in response_text:
+                                        message_part = response_text.replace("__AFTER_ACTION__", "").strip()
+                                        await send_whatsapp_message(from_number, message_part)
+                                        await send_main_menu(from_number, welcome=False)
+                                    else:
+                                        await send_whatsapp_message(from_number, response_text)
+
+                            # View cart from list selection
+                            elif selected_id == "view_cart":
+                                await send_cart_summary(from_number)
 
                             elif selected_id == "other_market":
                                 # User wants to type custom market
@@ -460,24 +497,38 @@ async def receive_message(request: Request):
                             # Check price unit selection buttons (Paint, Bag, Half Bag)
                             elif button_id.startswith("check_unit_"):
                                 unit = button_id.replace("check_unit_", "")
-                                from app.claude_tasks import handle_check_price_unit_selection
-                                response_text = await handle_check_price_unit_selection(from_number, unit)
-                                if "__ADD_TO_CART__:" in response_text:
-                                    # Format: message\n\n__ADD_TO_CART__:commodity:price:unit
-                                    parts = response_text.split("__ADD_TO_CART__:")
-                                    message_part = parts[0].strip()
-                                    cart_info = parts[1].split(":")
-                                    await send_whatsapp_message(from_number, message_part)
-                                    if len(cart_info) >= 3:
-                                        await send_add_to_cart_buttons(from_number, cart_info[0], cart_info[1], cart_info[2])
-                                elif "__AFTER_ACTION__" in response_text:
-                                    message_part = response_text.replace("__AFTER_ACTION__", "").strip()
-                                    await send_whatsapp_message(from_number, message_part)
-                                    await send_main_menu(from_number, welcome=False)
-                                elif response_text == "__MAIN_MENU__":
-                                    await send_main_menu(from_number, welcome=True)
+
+                                # Check if this is rice + bag - show bag sizes
+                                partial = partial_price_reports.get(from_number, {})
+                                commodity = partial.get("commodity", "")
+                                if commodity.startswith("rice_") and unit == "bag":
+                                    # Show rice bag sizes
+                                    await send_rice_bag_sizes(from_number, commodity)
                                 else:
-                                    await send_whatsapp_message(from_number, response_text)
+                                    # Normal flow
+                                    from app.claude_tasks import handle_check_price_unit_selection
+                                    response_text = await handle_check_price_unit_selection(from_number, unit)
+                                    if "__ADD_TO_CART__:" in response_text:
+                                        # Format: message\n\n__ADD_TO_CART__:commodity:price:unit
+                                        parts = response_text.split("__ADD_TO_CART__:")
+                                        message_part = parts[0].strip()
+                                        cart_info = parts[1].split(":")
+                                        await send_whatsapp_message(from_number, message_part)
+                                        if len(cart_info) >= 3:
+                                            await send_add_to_cart_buttons(from_number, cart_info[0], cart_info[1], cart_info[2])
+                                    elif "__AFTER_ACTION__" in response_text:
+                                        message_part = response_text.replace("__AFTER_ACTION__", "").strip()
+                                        await send_whatsapp_message(from_number, message_part)
+                                        await send_main_menu(from_number, welcome=False)
+                                    elif response_text == "__MAIN_MENU__":
+                                        await send_main_menu(from_number, welcome=True)
+                                    else:
+                                        await send_whatsapp_message(from_number, response_text)
+
+                            # Egg unit selection (crate/half_crate)
+                            elif button_id.startswith("egg_unit_"):
+                                unit = button_id.replace("egg_unit_", "")
+                                await send_egg_prices(from_number, unit)
 
                             # Commodity selection buttons (check flow)
                             elif button_id.startswith("check_"):
@@ -495,19 +546,17 @@ async def receive_message(request: Request):
 
 
                             # Cart buttons
-                            elif button_id.startswith("add_to_cart_"):
-                                # Format: add_to_cart_{commodity}_{unit}_{price}
-                                # Parse from end since commodity can have underscores
-                                parts = button_id.replace("add_to_cart_", "").split("_")
-                                if len(parts) >= 3:
-                                    price = parts[-1]
-                                    unit = parts[-2]
-                                    commodity = "_".join(parts[:-2])
+                            elif button_id.startswith("add_to_cart|"):
+                                # Format: add_to_cart|{commodity}|{unit}|{price}
+                                parts = button_id.split("|")
+                                if len(parts) >= 4:
+                                    commodity = parts[1]
+                                    unit = parts[2]
+                                    price = parts[3]
                                     response_text = await handle_add_to_cart(from_number, commodity, unit, float(price))
                                 else:
-                                    # Fallback for old format (just commodity)
-                                    commodity = button_id.replace("add_to_cart_", "")
-                                    response_text = await handle_add_to_cart(from_number, commodity)
+                                    # Fallback
+                                    response_text = "Something went wrong. Please try again.\n\n__AFTER_ACTION__"
                                 if "__AFTER_ACTION__" in response_text:
                                     message_part = response_text.replace("__AFTER_ACTION__", "").strip()
                                     await send_whatsapp_message(from_number, message_part)
@@ -651,37 +700,53 @@ async def receive_message(request: Request):
                             else:
                                 variety_prefixes = ["garri_", "rice_", "beans_", "egg_"]
                                 if any(button_id.startswith(prefix) for prefix in variety_prefixes):
-                                    # Check/Report flow
-                                    response_text = await handle_variety_selection(from_number, button_id)
-                                    # Check what's next based on response
-                                    if response_text == "__SELECT_UNIT__":
-                                        # Get commodity from partial data for commodity-specific units
-                                        partial = partial_price_reports.get(from_number, {})
-                                        commodity = partial.get("commodity")
-                                        await send_unit_list(from_number, commodity)
-                                    elif response_text == "__SELECT_MARKET__":
-                                        await send_market_list(from_number, MARKETS_CACHE)
-                                    elif response_text.startswith("__CHECK_PRICE_UNIT__:"):
-                                        # Format: __CHECK_PRICE_UNIT__:commodity|commodity_display
-                                        marker_data = response_text.split(":")[1]
-                                        parts = marker_data.split("|")
-                                        commodity = parts[0]
-                                        commodity_display = parts[1] if len(parts) > 1 else commodity
-                                        await send_check_price_unit_buttons(from_number, commodity_display, commodity)
-                                    elif "__ADD_TO_CART__:" in response_text:
-                                        # Format: message\n\n__ADD_TO_CART__:commodity:price:unit
-                                        parts = response_text.split("__ADD_TO_CART__:")
-                                        message_part = parts[0].strip()
-                                        cart_info = parts[1].split(":")
-                                        await send_whatsapp_message(from_number, message_part)
-                                        if len(cart_info) >= 3:
-                                            await send_add_to_cart_buttons(from_number, cart_info[0], cart_info[1], cart_info[2])
-                                    elif "__AFTER_ACTION__" in response_text:
-                                        message_part = response_text.replace("__AFTER_ACTION__", "").strip()
-                                        await send_whatsapp_message(from_number, message_part)
-                                        await send_main_menu(from_number, welcome=False)
+                                    action = user_action_context.get(from_number, "report_price")
+
+                                    # CHECK PRICE flow - optimized UX for garri and beans
+                                    if action == "check_price":
+                                        if button_id.startswith("garri_") or button_id.startswith("beans_"):
+                                            # Show all unit prices at once
+                                            await send_variety_all_prices(from_number, button_id)
+                                        elif button_id.startswith("rice_"):
+                                            # Rice keeps unit selection (for bag size handling)
+                                            partial_price_reports[from_number] = {
+                                                "commodity": button_id,
+                                                "action": "check_price",
+                                                "awaiting": "check_unit"
+                                            }
+                                            commodity_display = button_id.replace("_", " ").title()
+                                            await send_check_price_unit_buttons(from_number, commodity_display, button_id)
+                                        else:
+                                            # Default - call handle_variety_selection
+                                            response_text = await handle_variety_selection(from_number, button_id)
+                                            if response_text.startswith("__CHECK_PRICE_UNIT__:"):
+                                                marker_data = response_text.split(":")[1]
+                                                parts = marker_data.split("|")
+                                                commodity = parts[0]
+                                                commodity_display = parts[1] if len(parts) > 1 else commodity
+                                                await send_check_price_unit_buttons(from_number, commodity_display, commodity)
                                     else:
-                                        await send_whatsapp_message(from_number, response_text)
+                                        # REPORT PRICE flow - unchanged
+                                        response_text = await handle_variety_selection(from_number, button_id)
+                                        if response_text == "__SELECT_UNIT__":
+                                            partial = partial_price_reports.get(from_number, {})
+                                            commodity = partial.get("commodity")
+                                            await send_unit_list(from_number, commodity)
+                                        elif response_text == "__SELECT_MARKET__":
+                                            await send_market_list(from_number, MARKETS_CACHE)
+                                        elif "__ADD_TO_CART__:" in response_text:
+                                            parts = response_text.split("__ADD_TO_CART__:")
+                                            message_part = parts[0].strip()
+                                            cart_info = parts[1].split(":")
+                                            await send_whatsapp_message(from_number, message_part)
+                                            if len(cart_info) >= 3:
+                                                await send_add_to_cart_buttons(from_number, cart_info[0], cart_info[1], cart_info[2])
+                                        elif "__AFTER_ACTION__" in response_text:
+                                            message_part = response_text.replace("__AFTER_ACTION__", "").strip()
+                                            await send_whatsapp_message(from_number, message_part)
+                                            await send_main_menu(from_number, welcome=False)
+                                        else:
+                                            await send_whatsapp_message(from_number, response_text)
 
                     else:
                         logger.info(f"Received non-text message type: {message_type}")
@@ -1306,6 +1371,474 @@ async def send_check_price_unit_buttons(to: str, commodity_display: str, commodi
 
 
 # =====================================================
+# OPTIMIZED COMMODITY PRICE FLOWS
+# =====================================================
+
+async def send_palm_oil_price(to: str):
+    """
+    Show palm oil price per litre directly with add to cart option.
+    Skips unit selection since palm oil only uses litre.
+    """
+    from app.database import get_prices_by_commodity_and_unit
+    from app.claude_tasks import format_price
+
+    try:
+        # Get price for palm oil in litres
+        prices = get_prices_by_commodity_and_unit("palm_oil", "litre")
+
+        if not prices:
+            await send_whatsapp_message(to, "No Red Oil prices available yet. Be the first to share!\n\n")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Get Ogbete price (or first available)
+        ogbete_price = None
+        for p in prices:
+            if p.get("market") == "ogbete":
+                ogbete_price = p.get("price")
+                break
+
+        if not ogbete_price and prices:
+            ogbete_price = prices[0].get("price")
+
+        price_display = format_price(ogbete_price)
+
+        # Send price message
+        message = f"*Red Oil* (Litre) prices:\n\n📍 Ogbete: {price_display}/litre"
+        await send_whatsapp_message(to, message)
+
+        # Send add to cart buttons
+        if ogbete_price and is_market_open():
+            await send_add_to_cart_buttons(to, "palm_oil", str(ogbete_price), "litre")
+        else:
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending palm oil price: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_crayfish_prices(to: str):
+    """
+    Show all crayfish unit prices at once with interactive list to add to cart.
+    """
+    from app.database import get_prices_for_commodity_all_units
+    from app.claude_tasks import format_price
+
+    try:
+        units = ["paint", "half_paint", "portion"]
+        prices = get_prices_for_commodity_all_units("crayfish", units)
+
+        if not prices:
+            await send_whatsapp_message(to, "No Crayfish prices available yet. Be the first to share!\n\n")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Build price message
+        message = "*Crayfish* prices at Ogbete:\n\n"
+        for unit in units:
+            if unit in prices:
+                price_display = format_price(prices[unit]["price"])
+                unit_display = unit.replace("_", " ").title()
+                message += f"🦐 {unit_display}: {price_display}\n"
+
+        await send_whatsapp_message(to, message)
+
+        # Send interactive list for cart selection
+        if is_market_open():
+            await send_crayfish_cart_list(to, prices)
+        else:
+            await send_whatsapp_message(to, "*Ordering available 8am - 4pm daily*")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending crayfish prices: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_crayfish_cart_list(to: str, prices: dict):
+    """Send interactive list for crayfish cart selection."""
+    from app.claude_tasks import format_price
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        rows = []
+        for unit, data in prices.items():
+            price = data["price"]
+            price_display = format_price(price)
+            unit_display = unit.replace("_", " ").title()
+            rows.append({
+                "id": f"cart_add|crayfish|{unit}|{price}",
+                "title": f"{unit_display} - {price_display}",
+                "description": f"Add {unit_display} to cart"
+            })
+
+        rows.append({
+            "id": "view_cart",
+            "title": "View Cart",
+            "description": "See items in your cart"
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": "Select to add to cart:"},
+                "action": {
+                    "button": "Choose Option",
+                    "sections": [{"title": "Add to Cart", "rows": rows}]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+
+    except Exception as e:
+        logger.error(f"Error sending crayfish cart list: {e}")
+
+
+async def send_egg_unit_buttons(to: str):
+    """Send crate/half crate selection buttons for eggs."""
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": "What unit for Egg?"},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "egg_unit_crate", "title": "Crate"}},
+                        {"type": "reply", "reply": {"id": "egg_unit_half_crate", "title": "Half Crate"}}
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+            if response.status_code == 200:
+                logger.info(f"✅ Egg unit buttons sent to {to}")
+                return True
+            return False
+
+    except Exception as e:
+        logger.error(f"Error sending egg unit buttons: {e}")
+        return False
+
+
+async def send_egg_prices(to: str, unit: str):
+    """
+    Show both Jumbo and Small egg prices for selected unit.
+    """
+    from app.database import get_prices_for_varieties_with_unit
+    from app.claude_tasks import format_price
+
+    try:
+        varieties = ["egg_jumbo", "egg_small"]
+        prices = get_prices_for_varieties_with_unit(varieties, unit)
+
+        unit_display = unit.replace("_", " ").title()
+
+        if not prices:
+            await send_whatsapp_message(to, f"No Egg ({unit_display}) prices available yet. Be the first to share!\n\n")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Build price message
+        message = f"*Egg* ({unit_display}) prices at Ogbete:\n\n"
+        for variety in varieties:
+            if variety in prices:
+                price_display = format_price(prices[variety]["price"])
+                variety_display = "Jumbo" if variety == "egg_jumbo" else "Small"
+                message += f"🥚 {variety_display}: {price_display}\n"
+
+        await send_whatsapp_message(to, message)
+
+        # Send buttons for cart selection (max 3 buttons)
+        if is_market_open():
+            await send_egg_cart_buttons(to, prices, unit)
+        else:
+            await send_whatsapp_message(to, "*Ordering available 8am - 4pm daily*")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending egg prices: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_egg_cart_buttons(to: str, prices: dict, unit: str):
+    """Send add to cart buttons for eggs (Jumbo, Small, View Cart)."""
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        buttons = []
+
+        if "egg_jumbo" in prices:
+            price = prices["egg_jumbo"]["price"]
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"add_to_cart|egg_jumbo|{unit}|{price}", "title": "Add Jumbo"}
+            })
+
+        if "egg_small" in prices:
+            price = prices["egg_small"]["price"]
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"add_to_cart|egg_small|{unit}|{price}", "title": "Add Small"}
+            })
+
+        buttons.append({
+            "type": "reply",
+            "reply": {"id": "view_cart", "title": "View Cart"}
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": "Add to cart:"},
+                "action": {"buttons": buttons}
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+
+    except Exception as e:
+        logger.error(f"Error sending egg cart buttons: {e}")
+
+
+async def send_variety_all_prices(to: str, variety: str):
+    """
+    Show all unit prices for a variety (garri or beans) at once.
+    Used for garri_white, garri_yellow, beans_oloyin, etc.
+    """
+    from app.database import get_prices_for_commodity_all_units
+    from app.claude_tasks import format_price
+
+    try:
+        # Determine which units to show based on commodity type
+        base = variety.split("_")[0]
+        if base == "garri":
+            units = ["paint", "half_paint", "bag", "half_bag"]
+        elif base == "beans":
+            units = ["paint", "half_paint", "bag", "half_bag"]
+        else:
+            units = ["paint", "bag"]
+
+        prices = get_prices_for_commodity_all_units(variety, units)
+
+        variety_display = variety.replace("_", " ").title()
+
+        if not prices:
+            await send_whatsapp_message(to, f"No {variety_display} prices available yet. Be the first to share!\n\n")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Build price message
+        emoji = "🌾" if base == "garri" else "🫘"
+        message = f"*{variety_display}* prices at Ogbete:\n\n"
+        for unit in units:
+            if unit in prices:
+                price_display = format_price(prices[unit]["price"])
+                unit_display = unit.replace("_", " ").title()
+                message += f"{emoji} {unit_display}: {price_display}\n"
+
+        await send_whatsapp_message(to, message)
+
+        # Send interactive list for cart selection
+        if is_market_open():
+            await send_variety_cart_list(to, variety, prices)
+        else:
+            await send_whatsapp_message(to, "*Ordering available 8am - 4pm daily*")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending variety prices: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_variety_cart_list(to: str, variety: str, prices: dict):
+    """Send interactive list for variety cart selection (garri/beans)."""
+    from app.claude_tasks import format_price
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        rows = []
+        for unit, data in prices.items():
+            price = data["price"]
+            price_display = format_price(price)
+            unit_display = unit.replace("_", " ").title()
+            rows.append({
+                "id": f"cart_add|{variety}|{unit}|{price}",
+                "title": f"{unit_display} - {price_display}",
+                "description": f"Add {unit_display} to cart"
+            })
+
+        rows.append({
+            "id": "view_cart",
+            "title": "View Cart",
+            "description": "See items in your cart"
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": "Select to add to cart:"},
+                "action": {
+                    "button": "Choose Option",
+                    "sections": [{"title": "Add to Cart", "rows": rows}]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+
+    except Exception as e:
+        logger.error(f"Error sending variety cart list: {e}")
+
+
+async def send_rice_bag_sizes(to: str, variety: str):
+    """
+    Show all rice bag sizes (50kg, 25kg, 12.5kg) with prices.
+    """
+    from app.database import get_prices_for_commodity_all_units
+    from app.claude_tasks import format_price
+
+    try:
+        # Rice bag sizes
+        units = ["bag_50kg", "bag_25kg", "bag_12kg"]
+        prices = get_prices_for_commodity_all_units(variety, units)
+
+        variety_display = variety.replace("_", " ").title()
+
+        if not prices:
+            # Fallback: try regular "bag" unit
+            prices = get_prices_for_commodity_all_units(variety, ["bag"])
+            if not prices:
+                await send_whatsapp_message(to, f"No {variety_display} bag prices available yet. Be the first to share!\n\n")
+                await send_main_menu(to, welcome=False)
+                return
+
+        # Build price message
+        message = f"*{variety_display}* (Bag) prices at Ogbete:\n\n"
+        for unit in units:
+            if unit in prices:
+                price_display = format_price(prices[unit]["price"])
+                size = unit.replace("bag_", "").replace("kg", " kg")
+                message += f"🍚 {size}: {price_display}\n"
+
+        # Also show regular bag if exists
+        if "bag" in prices:
+            price_display = format_price(prices["bag"]["price"])
+            message += f"🍚 Bag: {price_display}\n"
+
+        await send_whatsapp_message(to, message)
+
+        # Send interactive list for cart selection
+        if is_market_open():
+            await send_rice_bag_cart_list(to, variety, prices)
+        else:
+            await send_whatsapp_message(to, "*Ordering available 8am - 4pm daily*")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending rice bag sizes: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_rice_bag_cart_list(to: str, variety: str, prices: dict):
+    """Send interactive list for rice bag size selection."""
+    from app.claude_tasks import format_price
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        rows = []
+        unit_order = ["bag_50kg", "bag_25kg", "bag_12kg", "bag"]
+
+        for unit in unit_order:
+            if unit in prices:
+                price = prices[unit]["price"]
+                price_display = format_price(price)
+                if unit == "bag":
+                    size_display = "Bag"
+                else:
+                    size_display = unit.replace("bag_", "").replace("kg", " kg")
+                rows.append({
+                    "id": f"cart_add|{variety}|{unit}|{price}",
+                    "title": f"{size_display} - {price_display}",
+                    "description": f"Add {size_display} bag to cart"
+                })
+
+        rows.append({
+            "id": "view_cart",
+            "title": "View Cart",
+            "description": "See items in your cart"
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": "Select bag size to add to cart:"},
+                "action": {
+                    "button": "Choose Size",
+                    "sections": [{"title": "Bag Sizes", "rows": rows}]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+
+    except Exception as e:
+        logger.error(f"Error sending rice bag cart list: {e}")
+
+
+# =====================================================
 # CART & SHOPPING UI FUNCTIONS
 # =====================================================
 
@@ -1344,7 +1877,7 @@ async def send_add_to_cart_buttons(to: str, commodity: str, price: str, unit: st
                     "body": {"text": body_text},
                     "action": {
                         "buttons": [
-                            {"type": "reply", "reply": {"id": f"add_to_cart_{commodity}_{unit}_{price}", "title": "Add to Cart"}},
+                            {"type": "reply", "reply": {"id": f"add_to_cart|{commodity}|{unit}|{price}", "title": "Add to Cart"}},
                             {"type": "reply", "reply": {"id": "view_cart", "title": "View Cart"}}
                         ]
                     }
