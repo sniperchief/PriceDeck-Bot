@@ -100,7 +100,7 @@ SYSTEM_PROMPT = """You are PriceDeck, a WhatsApp bot for commodity prices in Enu
 YOUR JOB: Extract data from user messages and return JSON. System handles responses and missing fields.
 
 MARKETS: ogbete_main (Ogbete Market is the only supported market)
-COMMODITIES: garri, rice, beans, egg, crayfish, palm_oil (red oil)
+COMMODITIES: garri, rice, beans, egg, crayfish, palm_oil (red oil), beef, goat_meat (meat category)
 UNITS: paint, half_paint, bag, half_bag, kg, crate, half_crate, litre, portion
 
 COMMODITY-SPECIFIC UNITS:
@@ -108,6 +108,7 @@ COMMODITY-SPECIFIC UNITS:
 - Crayfish: paint, half_paint, portion
 - Egg: crate, half_crate
 - Garri, Rice, Beans: paint, half_paint, bag, half_bag, kg
+- Beef, Goat meat: kg only
 
 COMMODITY VARIETIES (use these exact names when user specifies type):
 - Garri: garri_white, garri_yellow, garri_ijebu

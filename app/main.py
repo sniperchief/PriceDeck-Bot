@@ -387,6 +387,9 @@ async def receive_message(request: Request):
                                     if commodity == "palm_oil":
                                         # Palm oil: Skip unit selection, show price immediately
                                         await send_palm_oil_price(from_number)
+                                    elif commodity == "meat":
+                                        # Meat: Show both beef and goat meat prices with add buttons
+                                        await send_meat_prices(from_number)
                                     elif commodity == "crayfish":
                                         # Crayfish: Show all unit prices at once
                                         await send_crayfish_prices(from_number)
@@ -411,9 +414,12 @@ async def receive_message(request: Request):
                                         commodity_display = commodity.replace("_", " ").title()
                                         await send_check_price_unit_buttons(from_number, commodity_display, commodity)
                                 else:
-                                    # REPORT PRICE flow - unchanged
+                                    # REPORT PRICE flow
                                     if commodity in ["garri", "rice", "beans", "egg"]:
                                         await send_variety_buttons(from_number, commodity)
+                                    elif commodity == "meat":
+                                        # Ask which meat type first
+                                        await send_meat_type_buttons(from_number)
                                     else:
                                         partial_price_reports[from_number] = {
                                             "commodity": commodity,
@@ -529,6 +535,15 @@ async def receive_message(request: Request):
                             elif button_id.startswith("egg_unit_"):
                                 unit = button_id.replace("egg_unit_", "")
                                 await send_egg_prices(from_number, unit)
+
+                            # Meat type selection (for report price flow)
+                            elif button_id.startswith("meat_type_"):
+                                meat_type = "beef" if button_id == "meat_type_beef" else "goat_meat"
+                                partial_price_reports[from_number] = {
+                                    "commodity": meat_type,
+                                    "awaiting": "unit"
+                                }
+                                await send_unit_list(from_number, meat_type)
 
                             # Commodity selection buttons (check flow)
                             elif button_id.startswith("check_"):
@@ -952,7 +967,7 @@ async def send_market_list(to: str, markets: list):
 
 async def send_unit_list(to: str, commodity: str = None):
     """
-    Send an interactive list of units/measurements to select from.
+    Send unit selection - uses buttons for ≤3 units, list for more.
     Units are commodity-specific when commodity is provided.
 
     Args:
@@ -968,27 +983,81 @@ async def send_unit_list(to: str, commodity: str = None):
         # Determine base commodity for unit selection
         base_commodity = commodity.split("_")[0] if commodity else ""
 
-        # Commodity-specific units
+        # Commodity-specific units - use buttons for ≤3 units
         if base_commodity == "palm" or commodity == "palm_oil":
-            units = [
-                {"id": "litre", "title": "Litre", "description": "Price per litre"},
-                {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
-            ]
-        elif base_commodity == "crayfish" or commodity == "crayfish":
-            units = [
-                {"id": "paint", "title": "Paint", "description": "Standard paint bucket"},
-                {"id": "half_paint", "title": "Half Paint", "description": "Half paint bucket"},
-                {"id": "portion", "title": "Portion", "description": "Single portion/serving"},
-                {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
-            ]
+            # Only 1 real unit - use button
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": "What unit for Red Oil?"},
+                    "action": {
+                        "buttons": [
+                            {"type": "reply", "reply": {"id": "litre", "title": "Litre"}}
+                        ]
+                    }
+                }
+            }
+        elif commodity in ["beef", "goat_meat"]:
+            # Only 1 real unit - use button
+            commodity_display = commodity.replace("_", " ").title()
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": f"What unit for {commodity_display}?"},
+                    "action": {
+                        "buttons": [
+                            {"type": "reply", "reply": {"id": "kg", "title": "Kg"}}
+                        ]
+                    }
+                }
+            }
         elif base_commodity == "egg" or commodity in ["egg", "egg_jumbo", "egg_small"]:
-            units = [
-                {"id": "crate", "title": "Crate", "description": "Full crate"},
-                {"id": "half_crate", "title": "Half Crate", "description": "Half crate"},
-                {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
-            ]
+            # 2 units - use buttons
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": "What unit for Egg?"},
+                    "action": {
+                        "buttons": [
+                            {"type": "reply", "reply": {"id": "crate", "title": "Crate"}},
+                            {"type": "reply", "reply": {"id": "half_crate", "title": "Half Crate"}}
+                        ]
+                    }
+                }
+            }
+        elif base_commodity == "crayfish" or commodity == "crayfish":
+            # 3 units - use buttons
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": "What unit for Crayfish?"},
+                    "action": {
+                        "buttons": [
+                            {"type": "reply", "reply": {"id": "paint", "title": "Paint"}},
+                            {"type": "reply", "reply": {"id": "half_paint", "title": "Half Paint"}},
+                            {"type": "reply", "reply": {"id": "portion", "title": "Portion"}}
+                        ]
+                    }
+                }
+            }
         else:
-            # Default units for garri, rice, beans
+            # Default units for garri, rice, beans - use list (6 items)
             units = [
                 {"id": "paint", "title": "Paint", "description": "Standard paint bucket"},
                 {"id": "half_paint", "title": "Half Paint", "description": "Half paint bucket"},
@@ -997,32 +1066,31 @@ async def send_unit_list(to: str, commodity: str = None):
                 {"id": "kg", "title": "Kg", "description": "Per kilogram"},
                 {"id": "other_unit", "title": "Other", "description": "Type a different unit"}
             ]
-
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": "interactive",
-            "interactive": {
-                "type": "list",
-                "header": {
-                    "type": "text",
-                    "text": "Select Unit"
-                },
-                "body": {
-                    "text": "What measurement/unit?"
-                },
-                "action": {
-                    "button": "Choose Unit",
-                    "sections": [
-                        {
-                            "title": "Units",
-                            "rows": units
-                        }
-                    ]
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "interactive",
+                "interactive": {
+                    "type": "list",
+                    "header": {
+                        "type": "text",
+                        "text": "Select Unit"
+                    },
+                    "body": {
+                        "text": "What measurement/unit?"
+                    },
+                    "action": {
+                        "button": "Choose Unit",
+                        "sections": [
+                            {
+                                "title": "Units",
+                                "rows": units
+                            }
+                        ]
+                    }
                 }
             }
-        }
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -1234,6 +1302,7 @@ async def send_commodity_list(to: str, action: str):
             {"id": f"{action}_egg", "title": "Egg", "description": "Jumbo, Small"},
             {"id": f"{action}_crayfish", "title": "Crayfish", "description": "Dried crayfish"},
             {"id": f"{action}_palm_oil", "title": "Red Oil", "description": "Palm oil"},
+            {"id": f"{action}_meat", "title": "Meat", "description": "Beef & Goat meat (per kg)"},
         ]
 
         payload = {
@@ -1417,6 +1486,148 @@ async def send_palm_oil_price(to: str):
         logger.error(f"Error sending palm oil price: {e}")
         await send_whatsapp_message(to, "Error fetching prices. Please try again.")
         await send_main_menu(to, welcome=False)
+
+
+async def send_meat_prices(to: str):
+    """
+    Show both beef and goat meat prices with buttons to add either to cart.
+    """
+    from app.database import get_prices_by_commodity_and_unit
+    from app.claude_tasks import format_price
+
+    try:
+        # Get prices for both meats
+        beef_prices = get_prices_by_commodity_and_unit("beef", "kg")
+        goat_prices = get_prices_by_commodity_and_unit("goat_meat", "kg")
+
+        if not beef_prices and not goat_prices:
+            await send_whatsapp_message(to, "No meat prices available yet. Be the first to share!\n\n")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Get Ogbete prices
+        beef_price = None
+        goat_price = None
+
+        for p in beef_prices or []:
+            if p.get("market") == "ogbete":
+                beef_price = p.get("price")
+                break
+        if not beef_price and beef_prices:
+            beef_price = beef_prices[0].get("price")
+
+        for p in goat_prices or []:
+            if p.get("market") == "ogbete":
+                goat_price = p.get("price")
+                break
+        if not goat_price and goat_prices:
+            goat_price = goat_prices[0].get("price")
+
+        # Build price message
+        message = "*Meat Prices* at Ogbete:\n\n"
+        if beef_price:
+            message += f"🥩 Beef (Cow Meat): {format_price(beef_price)}/kg\n"
+        else:
+            message += "🥩 Beef: No price yet\n"
+        if goat_price:
+            message += f"🐐 Goat Meat: {format_price(goat_price)}/kg\n"
+        else:
+            message += "🐐 Goat Meat: No price yet\n"
+
+        await send_whatsapp_message(to, message)
+
+        # Send add to cart buttons (max 3 buttons)
+        if is_market_open() and (beef_price or goat_price):
+            await send_meat_cart_buttons(to, beef_price, goat_price)
+        else:
+            if not is_market_open():
+                await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily at Ogbete Market._")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending meat prices: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_meat_type_buttons(to: str):
+    """
+    Send buttons to select meat type (for report price flow).
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": "Which type of meat?"},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "meat_type_beef", "title": "Beef (Cow Meat)"}},
+                        {"type": "reply", "reply": {"id": "meat_type_goat", "title": "Goat Meat"}}
+                    ]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+
+    except Exception as e:
+        logger.error(f"Error sending meat type buttons: {e}")
+
+
+async def send_meat_cart_buttons(to: str, beef_price: float, goat_price: float):
+    """
+    Send buttons to add beef or goat meat to cart.
+    Uses buttons (not list) since there are only 2-3 options.
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        buttons = []
+        if beef_price:
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"add_to_cart|beef|kg|{beef_price}", "title": "Add Beef"}
+            })
+        if goat_price:
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"add_to_cart|goat_meat|kg|{goat_price}", "title": "Add Goat Meat"}
+            })
+        buttons.append({
+            "type": "reply",
+            "reply": {"id": "view_cart", "title": "View Cart"}
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": "🛒 Shopping available at Ogbete Market only."},
+                "action": {"buttons": buttons}
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+
+    except Exception as e:
+        logger.error(f"Error sending meat cart buttons: {e}")
 
 
 async def send_crayfish_prices(to: str):
