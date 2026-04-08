@@ -50,7 +50,7 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 
 ## Supported Data
 
-**Commodities**: Garri (white, yellow, ijebu), Rice (local, foreign, ofada), Beans (oloyin, brown, iron), Egg (jumbo, small), Crayfish, Red Oil (palm oil)
+**Commodities**: Garri (white, yellow, ijebu), Rice (local, foreign, ofada), Beans (oloyin, brown, iron), Egg (jumbo, small), Crayfish, Red Oil (palm oil), Meat (beef, goat meat)
 
 **Markets (Enugu)**: Ogbete Main Market (only market currently active)
 
