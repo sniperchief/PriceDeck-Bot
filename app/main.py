@@ -2482,7 +2482,7 @@ async def send_vendor_order_notification(vendor_phone: str, order: dict):
     try:
         items = order.get("items", [])
         items_text = "\n".join([
-            f"- {item['commodity'].replace('_', ' ').title()} x{item['quantity']}"
+            f"- {item['commodity'].replace('_', ' ').title()} ({item['unit'].replace('_', ' ')}) x{item['quantity']}"
             for item in items
         ])
 
@@ -2790,7 +2790,7 @@ async def send_contributor_pickup_notification(agent_phone: str, order: dict, ve
     try:
         items = order.get("items", [])
         items_text = "\n".join([
-            f"- {item['commodity'].replace('_', ' ').title()} x{item['quantity']}"
+            f"- {item['commodity'].replace('_', ' ').title()} ({item['unit'].replace('_', ' ')}) x{item['quantity']}"
             for item in items
         ])
 
@@ -2925,7 +2925,7 @@ async def send_logistics_delivery_notification(logistics_phone: str, order: dict
     try:
         items = order.get("items", [])
         items_text = ", ".join([
-            f"{item['commodity'].replace('_', ' ').title()} x{item['quantity']}"
+            f"{item['commodity'].replace('_', ' ').title()} ({item['unit'].replace('_', ' ')}) x{item['quantity']}"
             for item in items
         ])
 

@@ -3,6 +3,7 @@ Database helper functions for PriceDeck
 Handles all Supabase database operations
 """
 import logging
+import secrets
 from typing import Optional, Dict, List, Any
 from datetime import datetime, timezone
 from supabase import create_client, Client
@@ -1003,22 +1004,33 @@ def get_vendor_by_phone(whatsapp_number: str) -> Optional[Dict[str, Any]]:
 
 def generate_order_number() -> str:
     """
-    Generate unique order number: PD-YYYYMMDD-XXX
+    Generate unique order number: PD-XXXXXX (6 random chars)
+
+    Uses safe character set excluding confusing chars (0/O, 1/I/L, 5/S)
+    32^6 = 1 billion+ combinations
 
     Returns:
         Order number string
     """
-    from datetime import date
-    today = date.today().strftime("%Y%m%d")
+    SAFE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-    # Get count of orders today
-    response = supabase.table("orders")\
-        .select("id")\
-        .like("order_number", f"PD-{today}-%")\
-        .execute()
+    max_attempts = 10
+    for _ in range(max_attempts):
+        code = ''.join(secrets.choice(SAFE_CHARS) for _ in range(6))
+        order_num = f"PD-{code}"
 
-    count = len(response.data) if response.data else 0
-    return f"PD-{today}-{count + 1:03d}"
+        # Check if exists
+        response = supabase.table("orders")\
+            .select("id")\
+            .eq("order_number", order_num)\
+            .execute()
+
+        if not response.data:
+            return order_num
+
+    # Fallback: add timestamp suffix if somehow all attempts collide
+    import time
+    return f"PD-{code}-{int(time.time()) % 10000}"
 
 
 def create_order(
