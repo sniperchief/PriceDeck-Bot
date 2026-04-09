@@ -66,6 +66,31 @@ app = FastAPI(
 COMMODITIES_CACHE = []
 MARKETS_CACHE = []
 
+# Commodity image URLs (hosted on Supabase Storage)
+COMMODITY_IMAGE_BASE_URL = "https://tctepjqsumnnofvpytqe.supabase.co/storage/v1/object/public/commodity-images"
+COMMODITY_IMAGES = {
+    "beans_brown": f"{COMMODITY_IMAGE_BASE_URL}/beans_brown.jpg",
+    "beans_white": f"{COMMODITY_IMAGE_BASE_URL}/beans_white.jpg",
+    "beans_oloyin": f"{COMMODITY_IMAGE_BASE_URL}/beans_white.jpg",  # Use white beans image
+    "beans_iron": f"{COMMODITY_IMAGE_BASE_URL}/beans_brown.jpg",    # Use brown beans image
+    "egg": f"{COMMODITY_IMAGE_BASE_URL}/egg.jpg",
+    "egg_jumbo": f"{COMMODITY_IMAGE_BASE_URL}/egg.jpg",
+    "egg_small": f"{COMMODITY_IMAGE_BASE_URL}/egg.jpg",
+    "beef": f"{COMMODITY_IMAGE_BASE_URL}/beef.jpg",
+    "goat_meat": f"{COMMODITY_IMAGE_BASE_URL}/goat_meat.jpg",
+    "rice": f"{COMMODITY_IMAGE_BASE_URL}/rice.jpg",
+    "rice_local": f"{COMMODITY_IMAGE_BASE_URL}/rice.jpg",
+    "rice_foreign": f"{COMMODITY_IMAGE_BASE_URL}/rice.jpg",
+    "rice_ofada": f"{COMMODITY_IMAGE_BASE_URL}/rice.jpg",
+    "garri_white": f"{COMMODITY_IMAGE_BASE_URL}/garri_white.jpg",
+    "garri_yellow": f"{COMMODITY_IMAGE_BASE_URL}/garri_yellow.jpg",
+    "garri_ijebu": f"{COMMODITY_IMAGE_BASE_URL}/garri_yellow.jpg",  # Use yellow garri image
+}
+
+def get_commodity_image(commodity: str) -> str:
+    """Get image URL for a commodity, returns None if no image available."""
+    return COMMODITY_IMAGES.get(commodity)
+
 # Message deduplication - prevents processing the same message twice
 # Key: message_id, Value: timestamp when processed
 processed_message_ids = {}
@@ -889,6 +914,53 @@ async def send_whatsapp_message(to: str, message: str):
         return False
 
 
+async def send_image_message(to: str, image_url: str, caption: str = None):
+    """
+    Send a WhatsApp image message with optional caption.
+
+    Args:
+        to: Recipient's WhatsApp number
+        image_url: Public URL of the image
+        caption: Optional caption text
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        image_payload = {"link": image_url}
+        if caption:
+            image_payload["caption"] = caption
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "image",
+            "image": image_payload
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Image sent to {to}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send image: {response.status_code} - {response.text}")
+                return False
+
+    except Exception as e:
+        logger.error(f"❌ Error sending image: {e}")
+        return False
+
+
 async def send_market_list(to: str, markets: list):
     """
     Send an interactive list of markets to select from
@@ -1534,12 +1606,16 @@ async def send_meat_prices(to: str):
         else:
             message += "🐐 Goat Meat: No price yet\n"
 
-        await send_whatsapp_message(to, message)
-
-        # Send add to cart buttons (max 3 buttons)
+        # Send combined message with image and buttons
         if is_market_open() and (beef_price or goat_price):
-            await send_meat_cart_buttons(to, beef_price, goat_price)
+            await send_meat_cart_buttons(to, beef_price, goat_price, message)
         else:
+            # No shopping - show image with prices
+            image_url = get_commodity_image("beef")
+            if image_url:
+                await send_image_message(to, image_url, message)
+            else:
+                await send_whatsapp_message(to, message)
             if not is_market_open():
                 await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily at Ogbete Market._")
             await send_main_menu(to, welcome=False)
@@ -1584,10 +1660,9 @@ async def send_meat_type_buttons(to: str):
         logger.error(f"Error sending meat type buttons: {e}")
 
 
-async def send_meat_cart_buttons(to: str, beef_price: float, goat_price: float):
+async def send_meat_cart_buttons(to: str, beef_price: float, goat_price: float, price_text: str):
     """
-    Send buttons to add beef or goat meat to cart.
-    Uses buttons (not list) since there are only 2-3 options.
+    Send image with prices and buttons to add beef or goat meat to cart.
     """
     try:
         headers = {
@@ -1611,16 +1686,29 @@ async def send_meat_cart_buttons(to: str, beef_price: float, goat_price: float):
             "reply": {"id": "view_cart", "title": "View Cart"}
         })
 
+        # Get beef image (default for meat category)
+        image_url = get_commodity_image("beef")
+
+        # Build interactive message with image header
+        interactive = {
+            "type": "button",
+            "body": {"text": price_text + "\n_Shopping at Ogbete Market_"},
+            "action": {"buttons": buttons}
+        }
+
+        # Add image header if available
+        if image_url:
+            interactive["header"] = {
+                "type": "image",
+                "image": {"link": image_url}
+            }
+
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": to,
             "type": "interactive",
-            "interactive": {
-                "type": "button",
-                "body": {"text": "🛒 Shopping available at Ogbete Market only."},
-                "action": {"buttons": buttons}
-            }
+            "interactive": interactive
         }
 
         async with httpx.AsyncClient() as client:
@@ -1757,7 +1845,7 @@ async def send_egg_unit_buttons(to: str):
 
 async def send_egg_prices(to: str, unit: str):
     """
-    Show both Jumbo and Small egg prices for selected unit.
+    Show both Jumbo and Small egg prices for selected unit with image.
     """
     from app.database import get_prices_for_varieties_with_unit
     from app.claude_tasks import format_price
@@ -1774,20 +1862,24 @@ async def send_egg_prices(to: str, unit: str):
             return
 
         # Build price message
-        message = f"*Egg* ({unit_display}) prices at Ogbete:\n\n"
+        message = f"*Egg* ({unit_display}) at Ogbete:\n\n"
         for variety in varieties:
             if variety in prices:
                 price_display = format_price(prices[variety]["price"])
                 variety_display = "Jumbo" if variety == "egg_jumbo" else "Small"
                 message += f"🥚 {variety_display}: {price_display}\n"
 
-        await send_whatsapp_message(to, message)
-
-        # Send buttons for cart selection (max 3 buttons)
+        # Send combined message with image and buttons
         if is_market_open():
-            await send_egg_cart_buttons(to, prices, unit)
+            await send_egg_cart_buttons(to, prices, unit, message)
         else:
-            await send_whatsapp_message(to, "*Ordering available 8am - 4pm daily*")
+            # No shopping - just show image with prices
+            image_url = get_commodity_image("egg")
+            if image_url:
+                await send_image_message(to, image_url, message)
+            else:
+                await send_whatsapp_message(to, message)
+            await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily at Ogbete Market._")
             await send_main_menu(to, welcome=False)
 
     except Exception as e:
@@ -1796,8 +1888,8 @@ async def send_egg_prices(to: str, unit: str):
         await send_main_menu(to, welcome=False)
 
 
-async def send_egg_cart_buttons(to: str, prices: dict, unit: str):
-    """Send add to cart buttons for eggs (Jumbo, Small, View Cart)."""
+async def send_egg_cart_buttons(to: str, prices: dict, unit: str, price_text: str):
+    """Send image with prices and add to cart buttons for eggs."""
     try:
         headers = {
             "Authorization": f"Bearer {WHATSAPP_TOKEN}",
@@ -1825,16 +1917,29 @@ async def send_egg_cart_buttons(to: str, prices: dict, unit: str):
             "reply": {"id": "view_cart", "title": "View Cart"}
         })
 
+        # Get egg image
+        image_url = get_commodity_image("egg")
+
+        # Build interactive message with image header
+        interactive = {
+            "type": "button",
+            "body": {"text": price_text + "\n_Shopping at Ogbete Market_"},
+            "action": {"buttons": buttons}
+        }
+
+        # Add image header if available
+        if image_url:
+            interactive["header"] = {
+                "type": "image",
+                "image": {"link": image_url}
+            }
+
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": to,
             "type": "interactive",
-            "interactive": {
-                "type": "button",
-                "body": {"text": "Add to cart:"},
-                "action": {"buttons": buttons}
-            }
+            "interactive": interactive
         }
 
         async with httpx.AsyncClient() as client:
@@ -1846,7 +1951,7 @@ async def send_egg_cart_buttons(to: str, prices: dict, unit: str):
 
 async def send_variety_all_prices(to: str, variety: str):
     """
-    Show all unit prices for a variety (garri or beans) at once.
+    Show all unit prices for a variety (garri or beans) at once with image.
     Used for garri_white, garri_yellow, beans_oloyin, etc.
     """
     from app.database import get_prices_for_commodity_all_units
@@ -1873,20 +1978,25 @@ async def send_variety_all_prices(to: str, variety: str):
 
         # Build price message
         emoji = "🌾" if base == "garri" else "🫘"
-        message = f"*{variety_display}* prices at Ogbete:\n\n"
+        message = f"*{variety_display}* at Ogbete:\n\n"
         for unit in units:
             if unit in prices:
                 price_display = format_price(prices[unit]["price"])
                 unit_display = unit.replace("_", " ").title()
                 message += f"{emoji} {unit_display}: {price_display}\n"
 
-        await send_whatsapp_message(to, message)
+        # Send image with prices (WhatsApp lists don't support image headers)
+        image_url = get_commodity_image(variety)
+        if image_url:
+            await send_image_message(to, image_url, message)
+        else:
+            await send_whatsapp_message(to, message)
 
         # Send interactive list for cart selection
         if is_market_open():
             await send_variety_cart_list(to, variety, prices)
         else:
-            await send_whatsapp_message(to, "*Ordering available 8am - 4pm daily*")
+            await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily at Ogbete Market._")
             await send_main_menu(to, welcome=False)
 
     except Exception as e:
@@ -1947,6 +2057,7 @@ async def send_variety_cart_list(to: str, variety: str, prices: dict):
 async def send_rice_bag_sizes(to: str, variety: str):
     """
     Show all rice bag sizes (50kg, 25kg, 12.5kg) with prices.
+    NOTE: No image for rice bags yet - will be added when rice_bag.jpg is uploaded.
     """
     from app.database import get_prices_for_commodity_all_units
     from app.claude_tasks import format_price
