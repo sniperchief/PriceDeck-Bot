@@ -636,7 +636,9 @@ async def receive_message(request: Request):
                                             await send_delivery_area_list(from_number)
 
                             elif button_id == "continue_shopping":
-                                await send_main_menu(from_number, welcome=False)
+                                # Show commodity list directly (skip main menu)
+                                user_action_context[from_number] = "check_price"
+                                await send_commodity_list(from_number, "check")
 
                             elif button_id == "edit_cart":
                                 await send_edit_cart_list(from_number)
@@ -1991,6 +1993,9 @@ async def send_variety_all_prices(to: str, variety: str):
             await send_image_message(to, image_url, message)
         else:
             await send_whatsapp_message(to, message)
+
+        # Small delay to ensure WhatsApp delivers messages in order
+        await asyncio.sleep(0.5)
 
         # Send interactive list for cart selection
         if is_market_open():
