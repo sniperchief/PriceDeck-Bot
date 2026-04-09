@@ -2641,10 +2641,12 @@ async def send_checkout_confirmation(to: str):
             f"\n*Subtotal:* {format_price_display(subtotal)}",
             f"*Service Charge:* {format_price_display(service_charge)}",
             f"*Delivery:* {format_price_display(delivery_fee)}",
+            f"━━━━━━━━━━━━━━━",
             f"*Total:* {format_price_display(total)}",
-            f"\n*Deliver to:* {partial.get('delivery_address', 'N/A')}",
-            f"*Contact:* {partial.get('contact_phone', to)}",
-            "\nProceed to payment?"
+            f"\n⏱️ *Prep time:* 20-30 minutes",
+            f"📍 *Deliver to:* {partial.get('delivery_address', 'N/A')}",
+            f"📞 *Contact:* {partial.get('contact_phone', to)}",
+            "\n_Shopping from Ogbete Market_"
         ])
 
         summary = "\n".join(lines)
@@ -3554,8 +3556,10 @@ async def paystack_webhook(request: Request):
                 # Notify buyer
                 await send_whatsapp_message(
                     order["whatsapp_number"],
-                    f"Payment received for order #{order['order_number']}!\n\n"
-                    f"We're notifying the vendor now."
+                    f"✅ *Order Confirmed!*\n\n"
+                    f"Order #{order['order_number']} is being prepared.\n\n"
+                    f"⏱️ *Prep time:* 20-30 minutes\n\n"
+                    f"We'll notify you when it's ready for delivery!"
                 )
 
                 # Notify vendor
