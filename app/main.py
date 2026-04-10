@@ -2819,9 +2819,7 @@ async def send_vendor_order_notification(vendor_phone: str, order: dict):
         body_text = (
             f"*New Order #{order['order_number']}*\n\n"
             f"{items_text}\n\n"
-            f"*Total:* {total:,.0f}\n"
-            f"*Deliver to:* {order.get('delivery_address', 'N/A')}\n"
-            f"*Contact:* {order.get('contact_phone', 'N/A')}\n\n"
+            f"*Total:* ₦{total:,.0f}\n\n"
             f"Can you fulfill this order?"
         )
 
