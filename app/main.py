@@ -2910,8 +2910,11 @@ async def handle_vendor_order_response(vendor_phone: str, order_id: str, respons
         # Notify buyer
         await send_whatsapp_message(
             buyer_phone,
-            f"Great news! Your order #{order['order_number']} is confirmed!\n\n"
-            f"The vendor is preparing your items."
+            f"🎉 *Great News!*\n\n"
+            f"Order #{order['order_number']} accepted!\n\n"
+            f"The vendor is preparing your items.\n\n"
+            f"⏱️ *Prep time:* 20-30 minutes\n\n"
+            f"You'll be notified as soon as it's ready for delivery."
         )
 
         # Notify contributor/agent to pick up
@@ -3559,24 +3562,41 @@ async def paystack_webhook(request: Request):
                 # Notify buyer
                 await send_whatsapp_message(
                     order["whatsapp_number"],
-                    f"✅ *Order Confirmed!*\n\n"
-                    f"Order #{order['order_number']} is being prepared.\n\n"
-                    f"⏱️ *Prep time:* 20-30 minutes\n\n"
-                    f"We'll notify you when it's ready for delivery!"
+                    f"✅ *Payment Confirmed!*\n\n"
+                    f"Order #{order['order_number']}\n\n"
+                    f"We'll notify you as soon as a vendor accepts your order."
                 )
 
-                # Notify vendor
+                # Notify vendor with retry logic
                 from datetime import datetime, timezone
                 vendor = get_vendor_for_market("ogbete")
                 if vendor:
-                    update_order(
-                        order["id"],
-                        {"vendor_notified_at": datetime.now(timezone.utc).isoformat()}
-                    )
-                    await send_vendor_order_notification(
-                        vendor["whatsapp_number"],
-                        order
-                    )
+                    # Retry up to 3 times
+                    notification_sent = False
+                    for attempt in range(3):
+                        success = await send_vendor_order_notification(
+                            vendor["whatsapp_number"],
+                            order
+                        )
+                        if success:
+                            notification_sent = True
+                            update_order(
+                                order["id"],
+                                {"vendor_notified_at": datetime.now(timezone.utc).isoformat()}
+                            )
+                            break  # Success - stop retrying
+                        else:
+                            logger.warning(f"Vendor notification attempt {attempt + 1}/3 failed for order {order['order_number']}")
+                            if attempt < 2:  # Don't wait after last attempt
+                                await asyncio.sleep(2)  # Wait 2 seconds before retry
+
+                    # If all retries failed, notify admin
+                    if not notification_sent:
+                        logger.error(f"All 3 vendor notification attempts failed for order {order['order_number']}")
+                        await send_whatsapp_message(
+                            ADMIN_WHATSAPP_NUMBER,
+                            f"⚠️ URGENT: Order #{order['order_number']} paid but vendor notification failed after 3 attempts. Please notify vendor manually!"
+                        )
                 else:
                     # No vendor - notify admin
                     await send_whatsapp_message(
