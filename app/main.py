@@ -218,6 +218,39 @@ async def receive_message(request: Request):
                         message_body = message.get("text", {}).get("body", "")
                         logger.info(f"Message from {from_number} ({user_name}): {message_body}")
 
+                        # Check for vendor text reply (CONFIRM/REJECT order_number)
+                        message_upper = message_body.strip().upper()
+                        if message_upper.startswith("CONFIRM ") or message_upper.startswith("REJECT "):
+                            # Check if sender is a vendor
+                            if is_vendor(from_number):
+                                parts = message_body.strip().split(maxsplit=1)
+                                if len(parts) == 2:
+                                    action = parts[0].upper()  # CONFIRM or REJECT
+                                    order_number = parts[1].strip().upper()  # e.g., PD-ABC123
+
+                                    # Get order by order number
+                                    from app.database import get_order_by_number
+                                    order = get_order_by_number(order_number)
+
+                                    if order:
+                                        if order["status"] == "paid_awaiting_vendor":
+                                            # Process the vendor response
+                                            response_type = "confirmed" if action == "CONFIRM" else "rejected"
+                                            await handle_vendor_order_response(from_number, order["id"], response_type)
+                                            continue  # Skip Claude processing
+                                        else:
+                                            await send_whatsapp_message(
+                                                from_number,
+                                                f"Order #{order_number} is no longer awaiting confirmation.\nCurrent status: {order['status']}"
+                                            )
+                                            continue
+                                    else:
+                                        await send_whatsapp_message(
+                                            from_number,
+                                            f"Order #{order_number} not found. Please check the order number and try again."
+                                        )
+                                        continue
+
                         # Process message with Claude AI
                         response_text = await process_message(
                             message_text=message_body,
@@ -2802,11 +2835,15 @@ async def send_my_orders(to: str):
 
 async def send_vendor_order_notification(vendor_phone: str, order: dict):
     """
-    Notify vendor of new paid order with CONFIRM/REJECT buttons
+    Notify vendor of new paid order with CONFIRM/REJECT buttons.
+    Falls back to plain text if interactive message fails (e.g., outside 24hr window).
 
     Args:
         vendor_phone: Vendor's WhatsApp number
         order: Order data
+
+    Returns:
+        True if notification sent (either interactive or text), False if both failed
     """
     try:
         items = order.get("items", [])
@@ -2816,8 +2853,11 @@ async def send_vendor_order_notification(vendor_phone: str, order: dict):
         ])
 
         total = order.get("total", 0)
-        body_text = (
-            f"*New Order #{order['order_number']}*\n\n"
+        order_number = order['order_number']
+
+        # Interactive button message body
+        button_body_text = (
+            f"*New Order #{order_number}*\n\n"
             f"{items_text}\n\n"
             f"*Total:* ₦{total:,.0f}\n\n"
             f"Can you fulfill this order?"
@@ -2828,14 +2868,15 @@ async def send_vendor_order_notification(vendor_phone: str, order: dict):
             "Content-Type": "application/json"
         }
 
-        payload = {
+        # Step 1: Try interactive button message first
+        interactive_payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": vendor_phone,
             "type": "interactive",
             "interactive": {
                 "type": "button",
-                "body": {"text": body_text},
+                "body": {"text": button_body_text},
                 "action": {
                     "buttons": [
                         {"type": "reply", "reply": {"id": f"vendor_confirm_{order['id']}", "title": "CONFIRM"}},
@@ -2849,15 +2890,52 @@ async def send_vendor_order_notification(vendor_phone: str, order: dict):
             response = await client.post(
                 WHATSAPP_API_URL,
                 headers=headers,
-                json=payload,
+                json=interactive_payload,
                 timeout=10.0
             )
 
             if response.status_code == 200:
-                logger.info(f"✅ Vendor notification sent to {vendor_phone} for order {order['order_number']}")
+                logger.info(f"✅ Vendor notification (interactive) sent to {vendor_phone} for order {order_number}")
                 return True
             else:
-                logger.error(f"❌ Failed to send vendor notification: {response.status_code} - {response.text}")
+                logger.warning(f"⚠️ Interactive message failed: {response.status_code} - {response.text}")
+                logger.info(f"Trying text fallback for vendor {vendor_phone}...")
+
+        # Step 2: Fallback to plain text message
+        text_body = (
+            f"*New Order #{order_number}*\n\n"
+            f"{items_text}\n\n"
+            f"*Total:* ₦{total:,.0f}\n\n"
+            f"Reply with:\n"
+            f"*CONFIRM {order_number}*\n"
+            f"or\n"
+            f"*REJECT {order_number}*"
+        )
+
+        text_payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": vendor_phone,
+            "type": "text",
+            "text": {
+                "preview_url": False,
+                "body": text_body
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WHATSAPP_API_URL,
+                headers=headers,
+                json=text_payload,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Vendor notification (text fallback) sent to {vendor_phone} for order {order_number}")
+                return True
+            else:
+                logger.error(f"❌ Text fallback also failed: {response.status_code} - {response.text}")
                 return False
 
     except Exception as e:
