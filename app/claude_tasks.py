@@ -219,6 +219,8 @@ async def process_message(
                 return "__HELP__"
             elif command == "/online":
                 return "__AGENT_ONLINE__"
+            elif command == "/support":
+                return "__SUPPORT__"
             # Unknown command - show help
             else:
                 return (
@@ -226,7 +228,8 @@ async def process_message(
                     "/orders - View your orders\n"
                     "/cart - View your cart\n"
                     "/online - Check in for pickups (agents)\n"
-                    "/help - Show this help\n\n"
+                    "/help - Show this help\n"
+                    "/support - Contact support\n\n"
                     "__AFTER_ACTION__"
                 )
 
@@ -905,12 +908,8 @@ async def handle_query_prices(data: PriceQueryData) -> str:
 def handle_greeting_help(intent_type: str, user_name: str = None) -> str:
     """Handle greetings and help requests"""
     if intent_type == "greeting":
-        name = f" {user_name}" if user_name else ""
-        return (
-            f"Hey{name}! 👋 Welcome to *PriceDeck*\n\n"
-            "Share prices, check prices, shop from Ogbete.\n\n"
-            "Which market did you visit today?"
-        )
+        # Return main menu marker to show welcome message with buttons
+        return "__MAIN_MENU__"
     else:
         return _get_help_message()
 

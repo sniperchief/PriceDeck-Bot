@@ -26,7 +26,7 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 2. **Price Reporting** - Verified contributors submit commodity prices (Ogbete auto-selected)
 3. **Shopping Cart** - Users can add items to cart and checkout with Paystack payment (Ogbete Market only)
 4. **My Orders** - Users can view their order history (ongoing and completed)
-5. **Contributor System** - Users with 10+ verified submissions become verified contributors
+5. **Contributor System** - Verified contributors are assigned by admin (not auto-promoted)
 6. **Order Fulfillment** - Vendor → Pickup Agent (verified contributor) → Logistics flow
 
 ## Pricing
@@ -50,11 +50,17 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 
 ## Supported Data
 
-**Commodities**: Garri (white, yellow, ijebu), Rice (local, foreign, ofada), Beans (oloyin, brown, iron), Egg (jumbo, small), Crayfish, Red Oil (palm oil), Meat (beef, goat meat)
+**Categories & Items**:
+- **Grains**: Rice (local, foreign, ofada), Garri (white, yellow, ijebu), Beans (oloyin, brown, iron)
+- **Proteins**: Beef, Goat Meat, Chicken, Egg (jumbo, small)
+- **Seafood**: Crayfish, Stockfish, Dry Fish, Frozen Fish, Smoked Fish
+- **Vegetables**: Tomatoes, Pepper, Onions, Ugu Leaf, Bitter Leaf, Oha Leaf
+- **Oils**: Palm Oil, Kings Oil (vegetable oil)
+- **Spices & Pasta**: Maggi Knorr, Salt, Spaghetti, Indomie, Kitchen Glory, Gino Curry Powder, Gino Tomato Paste, Titus Sardine
 
 **Markets (Enugu)**: Ogbete Main Market (only market currently active)
 
-**Units**: paint, half_paint, bag, half_bag, kg, crate
+**Units**: paint, half_paint, bag, kg, crate, half_crate, litre, portion, bunch, pack, piece, sachet, rolls, carton, 500g, 1_litre, 5_litre
 
 ## Database Tables
 

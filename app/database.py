@@ -19,12 +19,13 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # USER MANAGEMENT
 # =====================================================
 
-def get_or_create_user(whatsapp_number: str) -> Dict[str, Any]:
+def get_or_create_user(whatsapp_number: str, name: str = None) -> Dict[str, Any]:
     """
-    Get existing user or create new user
+    Get existing user or create new user. Updates name if provided.
 
     Args:
         whatsapp_number: WhatsApp number in format "2348012345678"
+        name: User's WhatsApp profile name (optional)
 
     Returns:
         User record as dictionary
@@ -34,16 +35,24 @@ def get_or_create_user(whatsapp_number: str) -> Dict[str, Any]:
         response = supabase.table("users").select("*").eq("whatsapp_number", whatsapp_number).execute()
 
         if response.data and len(response.data) > 0:
+            user = response.data[0]
             logger.info(f"Existing user found: {whatsapp_number}")
-            return response.data[0]
+
+            # Update name if provided and different
+            if name and user.get("name") != name:
+                supabase.table("users").update({"name": name}).eq("whatsapp_number", whatsapp_number).execute()
+                user["name"] = name
+                logger.info(f"Updated user name: {whatsapp_number} -> {name}")
+
+            return user
 
         # Create new user
         new_user = {
             "whatsapp_number": whatsapp_number,
+            "name": name,
             "first_seen": datetime.now(timezone.utc).isoformat(),
             "is_verified_contributor": False,
-            "contribution_count": 0,
-            "subscription_tier": "free"
+            "contribution_count": 0
         }
 
         response = supabase.table("users").insert(new_user).execute()
@@ -53,6 +62,26 @@ def get_or_create_user(whatsapp_number: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error in get_or_create_user: {e}")
         raise
+
+
+def get_user(whatsapp_number: str) -> Optional[Dict[str, Any]]:
+    """
+    Get user by WhatsApp number
+
+    Args:
+        whatsapp_number: WhatsApp number in format "2348012345678"
+
+    Returns:
+        User record if found, None otherwise
+    """
+    try:
+        response = supabase.table("users").select("*").eq("whatsapp_number", whatsapp_number).execute()
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logger.error(f"Error in get_user: {e}")
+        return None
 
 
 def increment_contribution_count(whatsapp_number: str) -> bool:
@@ -75,11 +104,6 @@ def increment_contribution_count(whatsapp_number: str) -> bool:
 
             # Update count
             supabase.table("users").update({"contribution_count": new_count}).eq("whatsapp_number", whatsapp_number).execute()
-
-            # Check if user should be verified contributor (10+ accurate reports)
-            if new_count >= 10:
-                supabase.table("users").update({"is_verified_contributor": True}).eq("whatsapp_number", whatsapp_number).execute()
-                logger.info(f"User {whatsapp_number} is now a verified contributor!")
 
             return True
 
