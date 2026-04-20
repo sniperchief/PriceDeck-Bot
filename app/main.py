@@ -577,7 +577,7 @@ async def receive_message(request: Request):
                                 )
                                 await send_main_menu(from_number, welcome=False)
 
-                            elif selected_id in ["new_haven", "ogui_road", "independence_layout", "trans_ekulu", "gra", "presidential_road", "golf", "okpara_avenue", "agbani_road", "centenary_city"]:
+                            elif selected_id in ["new_haven", "ogui_road", "independence_layout", "trans_ekulu", "gra", "presidential_road", "golf", "okpara_avenue", "agbani_road"]:
                                 # User selected a delivery area
                                 area_names = {
                                     "new_haven": "New Haven",
@@ -588,8 +588,7 @@ async def receive_message(request: Request):
                                     "presidential_road": "Presidential Road",
                                     "golf": "Golf",
                                     "okpara_avenue": "Okpara Avenue",
-                                    "agbani_road": "Agbani Road",
-                                    "centenary_city": "Centenary City"
+                                    "agbani_road": "Agbani Road"
                                 }
                                 partial_cart[from_number] = partial_cart.get(from_number, {})
                                 partial_cart[from_number]["delivery_area"] = selected_id
@@ -3164,7 +3163,6 @@ DELIVERY_AREAS = [
     {"id": "golf", "title": "Golf", "description": "Golf Estate area"},
     {"id": "okpara_avenue", "title": "Okpara Avenue", "description": "Okpara Avenue area"},
     {"id": "agbani_road", "title": "Agbani Road", "description": "Agbani Road area"},
-    {"id": "centenary_city", "title": "Centenary City", "description": "Centenary City area"},
     {"id": "area_not_listed", "title": "My area not listed", "description": "I'm outside these areas"}
 ]
 
