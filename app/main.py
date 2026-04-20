@@ -630,15 +630,21 @@ async def receive_message(request: Request):
                                         # Direct price display for egg (crate/half_crate)
                                         elif commodity == "egg":
                                             await send_egg_prices_direct(from_number)
+                                        # Direct price display for crayfish (all units)
+                                        elif commodity == "crayfish":
+                                            await send_crayfish_prices(from_number)
+                                        # Direct price display for kings_oil (all units)
+                                        elif commodity == "kings_oil":
+                                            await send_kings_oil_prices(from_number)
+                                        # Direct price display for gino_tomato (all units)
+                                        elif commodity == "gino_tomato":
+                                            await send_gino_tomato_prices(from_number)
                                         # Items with varieties (none currently)
                                         elif commodity in ITEMS_WITH_VARIETIES:
                                             await send_variety_buttons(from_number, commodity)
                                         # Items with single unit - show price directly
                                         elif commodity in COMMODITY_UNITS and len(COMMODITY_UNITS.get(commodity, [])) == 1:
                                             await send_single_unit_price(from_number, commodity)
-                                        # Items with multiple units - show unit selection
-                                        elif commodity in COMMODITY_UNITS and len(COMMODITY_UNITS.get(commodity, [])) > 1:
-                                            await send_item_unit_selection(from_number, commodity)
                                         else:
                                             # Default flow
                                             partial_price_reports[from_number] = {
@@ -681,15 +687,6 @@ async def receive_message(request: Request):
                                         # Price prompt: "What's the price per paint?"
                                         await send_whatsapp_message(from_number, response_text)
 
-                            # Item unit selection (from send_item_unit_selection)
-                            elif selected_id.startswith("item_unit|"):
-                                # Format: item_unit|{commodity}|{unit}
-                                parts = selected_id.split("|")
-                                if len(parts) >= 3:
-                                    commodity = parts[1]
-                                    unit = parts[2]
-                                    # Show price for this commodity and unit
-                                    await send_unit_price(from_number, commodity, unit)
 
                             # Cart add from interactive list (new flow)
                             elif selected_id.startswith("cart_add|"):
@@ -804,14 +801,6 @@ async def receive_message(request: Request):
                                     await send_variety_buttons(from_number, commodity)
 
 
-                            # Item unit selection (from send_item_unit_selection buttons)
-                            elif button_id.startswith("item_unit|"):
-                                # Format: item_unit|{commodity}|{unit}
-                                parts = button_id.split("|")
-                                if len(parts) >= 3:
-                                    commodity = parts[1]
-                                    unit = parts[2]
-                                    await send_unit_price(from_number, commodity, unit)
 
                             # Grain unit toggle (garri/beans - paint vs half_paint)
                             elif button_id.startswith("grain_unit|"):
@@ -1821,151 +1810,6 @@ async def send_single_unit_price(to: str, commodity: str):
         await send_main_menu(to, welcome=False)
 
 
-async def send_item_unit_selection(to: str, commodity: str):
-    """
-    Show unit selection for items with multiple units (but no varieties).
-
-    Args:
-        to: Recipient's WhatsApp number
-        commodity: Commodity slug (e.g., "crayfish", "kings_oil")
-    """
-    try:
-        units = COMMODITY_UNITS.get(commodity, [])
-        if not units:
-            await send_whatsapp_message(to, "Item not found. Please try again.")
-            await send_main_menu(to, welcome=False)
-            return
-
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-            "Content-Type": "application/json"
-        }
-
-        commodity_display = commodity.replace("_", " ").title()
-
-        # Build buttons (max 3) or list if more
-        if len(units) <= 3:
-            buttons = []
-            for unit in units[:3]:
-                unit_display = unit.replace("_", " ").title()
-                buttons.append({
-                    "type": "reply",
-                    "reply": {
-                        "id": f"item_unit|{commodity}|{unit}",
-                        "title": unit_display
-                    }
-                })
-
-            payload = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": to,
-                "type": "interactive",
-                "interactive": {
-                    "type": "button",
-                    "body": {"text": f"Select unit for {commodity_display}:"},
-                    "action": {
-                        "buttons": buttons
-                    }
-                }
-            }
-        else:
-            # Use list for more than 3 units
-            rows = []
-            for unit in units:
-                unit_display = unit.replace("_", " ").title()
-                rows.append({
-                    "id": f"item_unit|{commodity}|{unit}",
-                    "title": unit_display,
-                    "description": f"Price per {unit_display}"
-                })
-
-            payload = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": to,
-                "type": "interactive",
-                "interactive": {
-                    "type": "list",
-                    "header": {"type": "text", "text": commodity_display},
-                    "body": {"text": f"Select unit for {commodity_display}:"},
-                    "action": {
-                        "button": "Choose Unit",
-                        "sections": [{"title": "Units", "rows": rows}]
-                    }
-                }
-            }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                WHATSAPP_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=10.0
-            )
-
-            if response.status_code == 200:
-                logger.info(f"✅ Unit selection sent for {commodity} to {to}")
-                return True
-            else:
-                logger.error(f"❌ Failed to send unit selection: {response.status_code}")
-                return False
-
-    except Exception as e:
-        logger.error(f"Error sending unit selection for {commodity}: {e}")
-        return False
-
-
-async def send_unit_price(to: str, commodity: str, unit: str):
-    """
-    Show price for a specific commodity and unit combination.
-
-    Args:
-        to: Recipient's WhatsApp number
-        commodity: Commodity slug (e.g., "kings_oil", "gino_tomato")
-        unit: Unit type (e.g., "1_litre", "sachet")
-    """
-    from app.database import get_prices_by_commodity_and_unit
-    from app.claude_tasks import format_price
-
-    try:
-        prices = get_prices_by_commodity_and_unit(commodity, unit)
-
-        commodity_display = commodity.replace("_", " ").title()
-        unit_display = unit.replace("_", " ").title()
-
-        if not prices:
-            await send_whatsapp_message(to, f"No {commodity_display} ({unit_display}) prices available yet.\n\n")
-            await send_main_menu(to, welcome=False)
-            return
-
-        # Get Ogbete price (or first available)
-        ogbete_price = None
-        for p in prices:
-            if p.get("market") == "ogbete":
-                ogbete_price = p.get("price")
-                break
-        if not ogbete_price and prices:
-            ogbete_price = prices[0].get("price")
-
-        price_display = format_price(ogbete_price)
-
-        # Send price message
-        message = f"*{commodity_display}* ({unit_display}) at Ogbete:\n\n{price_display}"
-        await send_whatsapp_message(to, message)
-
-        # Send add to cart button if market is open
-        if ogbete_price and is_market_open():
-            await send_add_to_cart_buttons(to, commodity, str(ogbete_price), unit)
-        else:
-            await send_main_menu(to, welcome=False)
-
-    except Exception as e:
-        logger.error(f"Error sending unit price for {commodity}/{unit}: {e}")
-        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
-        await send_main_menu(to, welcome=False)
-
-
 async def send_contributor_onboarding(to: str):
     """Send message explaining how to become a contributor"""
     message = (
@@ -2157,6 +2001,300 @@ async def send_egg_cart_buttons_direct(to: str, prices: dict):
 
     except Exception as e:
         logger.error(f"Error sending egg cart buttons: {e}")
+
+
+async def send_crayfish_prices(to: str):
+    """
+    Show crayfish prices for all units (paint, half_paint, portion) directly.
+    """
+    from app.database import get_prices_for_commodity_all_units
+    from app.claude_tasks import format_price
+
+    try:
+        units = ["paint", "half_paint", "portion"]
+        prices = get_prices_for_commodity_all_units("crayfish", units, market="ogbete")
+
+        if not prices:
+            await send_whatsapp_message(to, "No Crayfish prices available yet. Be the first to share!")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Build price message
+        message = "🦐 *Crayfish Prices*\n\n"
+        unit_labels = {"paint": "Paint", "half_paint": "Half Paint", "portion": "Portion"}
+        for unit in units:
+            if unit in prices:
+                price_display = format_price(prices[unit]["price"])
+                message += f"{unit_labels[unit]}: ₦{price_display}\n"
+
+        message += "\n_Prices from Ogbete Market_"
+
+        # Send image with prices
+        image_url = get_commodity_image("crayfish")
+        if image_url:
+            await send_image_message(to, image_url, message)
+        else:
+            await send_whatsapp_message(to, message)
+
+        await asyncio.sleep(0.5)
+
+        # Send cart list (3 units + More Seafood = 4 options, needs list)
+        if is_market_open():
+            await send_crayfish_cart_list(to, prices)
+        else:
+            await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily._")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending crayfish prices: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_crayfish_cart_list(to: str, prices: dict):
+    """Send interactive list for crayfish cart selection."""
+    from app.claude_tasks import format_price
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        rows = []
+        unit_labels = {"paint": "Paint", "half_paint": "Half Paint", "portion": "Portion"}
+
+        for unit in ["paint", "half_paint", "portion"]:
+            if unit in prices:
+                price = int(prices[unit]["price"])
+                price_display = format_price(price)
+                rows.append({
+                    "id": f"cart_add|crayfish|{unit}|{price}",
+                    "title": f"{unit_labels[unit]} - ₦{price_display}",
+                    "description": "Add to cart"
+                })
+
+        # Add More Seafood option
+        rows.append({
+            "id": "back_cat_seafood",
+            "title": "More Seafood",
+            "description": "Browse other seafood"
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": "Select to add to cart:"},
+                "action": {
+                    "button": "Choose Option",
+                    "sections": [{"title": "Crayfish", "rows": rows}]
+                }
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+            if response.status_code != 200:
+                logger.error(f"Failed to send crayfish cart list: {response.status_code} - {response.text}")
+
+    except Exception as e:
+        logger.error(f"Error sending crayfish cart list: {e}")
+
+
+async def send_kings_oil_prices(to: str):
+    """
+    Show Kings Oil prices for all units (1_litre, 5_litre) directly.
+    """
+    from app.database import get_prices_for_commodity_all_units
+    from app.claude_tasks import format_price
+
+    try:
+        units = ["1_litre", "5_litre"]
+        prices = get_prices_for_commodity_all_units("kings_oil", units, market="ogbete")
+
+        if not prices:
+            await send_whatsapp_message(to, "No Kings Oil prices available yet. Be the first to share!")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Build price message
+        message = "🫒 *Kings Oil Prices*\n\n"
+        unit_labels = {"1_litre": "1 Litre", "5_litre": "5 Litres"}
+        for unit in units:
+            if unit in prices:
+                price_display = format_price(prices[unit]["price"])
+                message += f"{unit_labels[unit]}: ₦{price_display}\n"
+
+        message += "\n_Prices from Ogbete Market_"
+
+        # Send image with prices
+        image_url = get_commodity_image("kings_oil")
+        if image_url:
+            await send_image_message(to, image_url, message)
+        else:
+            await send_whatsapp_message(to, message)
+
+        await asyncio.sleep(0.5)
+
+        # Send cart buttons (2 units + More Oils = 3 buttons)
+        if is_market_open():
+            await send_kings_oil_cart_buttons(to, prices)
+        else:
+            await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily._")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending kings oil prices: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_kings_oil_cart_buttons(to: str, prices: dict):
+    """Send cart buttons for Kings Oil: Add 1 Litre, Add 5 Litres, More Oils."""
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        buttons = []
+
+        if "1_litre" in prices:
+            price = int(prices["1_litre"]["price"])
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"cart_add|kings_oil|1_litre|{price}", "title": "Add 1 Litre"}
+            })
+
+        if "5_litre" in prices:
+            price = int(prices["5_litre"]["price"])
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"cart_add|kings_oil|5_litre|{price}", "title": "Add 5 Litres"}
+            })
+
+        buttons.append({
+            "type": "reply",
+            "reply": {"id": "back_cat_oils", "title": "More Oils"}
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": "Add to cart or browse more:"},
+                "action": {"buttons": buttons}
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+            if response.status_code != 200:
+                logger.error(f"Failed to send kings oil cart buttons: {response.status_code} - {response.text}")
+
+    except Exception as e:
+        logger.error(f"Error sending kings oil cart buttons: {e}")
+
+
+async def send_gino_tomato_prices(to: str):
+    """
+    Show Gino Tomato prices for all units (sachet, rolls) directly.
+    """
+    from app.database import get_prices_for_commodity_all_units
+    from app.claude_tasks import format_price
+
+    try:
+        units = ["sachet", "rolls"]
+        prices = get_prices_for_commodity_all_units("gino_tomato", units, market="ogbete")
+
+        if not prices:
+            await send_whatsapp_message(to, "No Gino Tomato prices available yet. Be the first to share!")
+            await send_main_menu(to, welcome=False)
+            return
+
+        # Build price message
+        message = "🍅 *Gino Tomato Prices*\n\n"
+        unit_labels = {"sachet": "Sachet", "rolls": "Rolls"}
+        for unit in units:
+            if unit in prices:
+                price_display = format_price(prices[unit]["price"])
+                message += f"{unit_labels[unit]}: ₦{price_display}\n"
+
+        message += "\n_Prices from Ogbete Market_"
+
+        # Send message (no image for gino_tomato)
+        await send_whatsapp_message(to, message)
+
+        await asyncio.sleep(0.5)
+
+        # Send cart buttons (2 units + More Spices = 3 buttons)
+        if is_market_open():
+            await send_gino_tomato_cart_buttons(to, prices)
+        else:
+            await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily._")
+            await send_main_menu(to, welcome=False)
+
+    except Exception as e:
+        logger.error(f"Error sending gino tomato prices: {e}")
+        await send_whatsapp_message(to, "Error fetching prices. Please try again.")
+        await send_main_menu(to, welcome=False)
+
+
+async def send_gino_tomato_cart_buttons(to: str, prices: dict):
+    """Send cart buttons for Gino Tomato: Add Sachet, Add Rolls, More Spices."""
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        buttons = []
+
+        if "sachet" in prices:
+            price = int(prices["sachet"]["price"])
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"cart_add|gino_tomato|sachet|{price}", "title": "Add Sachet"}
+            })
+
+        if "rolls" in prices:
+            price = int(prices["rolls"]["price"])
+            buttons.append({
+                "type": "reply",
+                "reply": {"id": f"cart_add|gino_tomato|rolls|{price}", "title": "Add Rolls"}
+            })
+
+        buttons.append({
+            "type": "reply",
+            "reply": {"id": "back_cat_spices_pasta", "title": "More Spices"}
+        })
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": "Add to cart or browse more:"},
+                "action": {"buttons": buttons}
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10.0)
+            if response.status_code != 200:
+                logger.error(f"Failed to send gino tomato cart buttons: {response.status_code} - {response.text}")
+
+    except Exception as e:
+        logger.error(f"Error sending gino tomato cart buttons: {e}")
 
 
 async def send_variety_all_prices(to: str, variety: str):
