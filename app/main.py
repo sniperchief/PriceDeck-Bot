@@ -136,7 +136,7 @@ CATEGORY_ITEMS = {
         {"id": "pepper", "title": "Pepper", "description": "Per portion"},
         {"id": "onions", "title": "Onions", "description": "Per portion"},
         {"id": "ugu_leaf", "title": "Ugu Leaf", "description": "Per bunch"},
-        {"id": "bitter_leaf", "title": "Bitter Leaf", "description": "Per bunch"},
+        {"id": "bitter_leaf", "title": "Bitter Leaf", "description": "Per portion"},
         {"id": "oha_leaf", "title": "Oha Leaf", "description": "Per bunch"},
     ],
     "oils": [
@@ -177,7 +177,7 @@ COMMODITY_UNITS = {
     "pepper": ["portion"],
     "onions": ["portion"],
     "ugu_leaf": ["bunch"],
-    "bitter_leaf": ["bunch"],
+    "bitter_leaf": ["portion"],
     "oha_leaf": ["bunch"],
     # Oils
     "palm_oil": ["litre"],
