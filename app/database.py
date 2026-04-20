@@ -505,16 +505,16 @@ def get_prices_for_commodity_all_units(commodity: str, units: List[str], market:
 def get_prices_for_varieties_with_unit(varieties: List[str], unit: str, market: str = "ogbete", city: str = "enugu") -> Dict[str, Dict[str, Any]]:
     """
     Get latest prices for multiple varieties with a specific unit at a market.
-    Used for eggs (show jumbo and small prices for crate or half_crate).
+    Used for garri, beans, rice varieties.
 
     Args:
-        varieties: List of variety names (e.g., ["egg_jumbo", "egg_small"])
-        unit: Unit type (e.g., "crate")
+        varieties: List of variety names (e.g., ["garri_white", "garri_yellow"])
+        unit: Unit type (e.g., "paint")
         market: Market slug (default: "ogbete")
         city: City (default: "enugu")
 
     Returns:
-        Dict mapping variety to price data: {"egg_jumbo": {"price": 6500, ...}, ...}
+        Dict mapping variety to price data: {"garri_white": {"price": 2500, ...}, ...}
     """
     try:
         result = {}

@@ -51,8 +51,8 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 ## Supported Data
 
 **Categories & Items**:
-- **Grains**: Rice (local, foreign, ofada), Garri (white, yellow, ijebu), Beans (oloyin, brown, iron)
-- **Proteins**: Beef, Goat Meat, Chicken, Egg (jumbo, small)
+- **Grains**: Rice (local, foreign), Garri (white, yellow), Beans (brown, iron)
+- **Proteins**: Beef (kg), Goat Meat (kg), Chicken (kg), Egg (crate, half_crate)
 - **Seafood**: Crayfish, Stockfish, Dry Fish, Frozen Fish, Smoked Fish
 - **Vegetables**: Tomatoes, Pepper, Onions, Ugu Leaf, Bitter Leaf, Oha Leaf
 - **Oils**: Palm Oil, Kings Oil (vegetable oil)
@@ -60,7 +60,14 @@ WhatsApp-based commodity price intelligence bot for Nigerian markets, starting w
 
 **Markets (Enugu)**: Ogbete Main Market (only market currently active)
 
-**Units**: paint, half_paint, bag, kg, crate, half_crate, litre, portion, bunch, pack, piece, sachet, rolls, carton, 500g, 1_litre, 5_litre
+**Units**: paint, half_paint, bag_25kg, bag_10kg, kg, crate, half_crate, litre, portion, bunch, pack, piece, sachet, rolls, carton, 500g, 1_litre, 5_litre
+
+**UX Flow (Simplified - 1 tap to see prices)**:
+- Garri/Beans: Tap → See both varieties' paint prices → Add to cart or see half paint prices
+- Rice: Tap → See Local & Foreign paint prices → Add to cart or see bag prices (25kg, 10kg)
+- Egg: Tap → See crate & half_crate prices → Add to cart or browse more proteins
+- Beef/Goat Meat/Chicken: Tap → See kg price → Add to cart or browse more proteins
+- All items include "More [Category]" button for easy navigation
 
 ## Database Tables
 

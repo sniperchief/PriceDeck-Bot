@@ -101,20 +101,22 @@ YOUR JOB: Extract data from user messages and return JSON. System handles respon
 
 MARKETS: ogbete_main (Ogbete Market is the only supported market)
 COMMODITIES: garri, rice, beans, egg, crayfish, palm_oil (red oil), beef, goat_meat (meat category)
-UNITS: paint, half_paint, bag, half_bag, kg, crate, half_crate, litre, portion
+UNITS: paint, half_paint, bag_25kg, bag_10kg, kg, crate, half_crate, litre, portion
 
 COMMODITY-SPECIFIC UNITS:
 - Palm oil (red oil): litre
 - Crayfish: paint, half_paint, portion
 - Egg: crate, half_crate
-- Garri, Rice, Beans: paint, half_paint, bag, half_bag, kg
+- Garri: paint, half_paint only
+- Beans: paint, half_paint only
+- Rice: paint, bag_25kg, bag_10kg
 - Beef, Goat meat: kg only
 
 COMMODITY VARIETIES (use these exact names when user specifies type):
-- Garri: garri_white, garri_yellow, garri_ijebu
-- Rice: rice_local, rice_foreign, rice_ofada
-- Beans: beans_oloyin, beans_brown, beans_iron
-- Egg: egg_jumbo, egg_small
+- Garri: garri_white, garri_yellow
+- Rice: rice_local, rice_foreign
+- Beans: beans_brown, beans_iron
+- Egg: just "egg" (no varieties, units are crate and half_crate)
 
 DETECT THESE INTENTS:
 
@@ -136,11 +138,11 @@ Examples:
 ```
 - "local rice 45k bag ogbete" → all fields present
 ```json
-{{"action": "save_price", "commodity": "rice_local", "price": 45000, "unit": "bag", "market": "ogbete_main"}}
+{{"action": "save_price", "commodity": "rice_local", "price": 45000, "unit": "bag_25kg", "market": "ogbete_main"}}
 ```
-- "oloyin beans 35k" → variety specified (oloyin/honey beans)
+- "brown beans 35k" → variety specified
 ```json
-{{"action": "save_price", "commodity": "beans_oloyin", "price": 35000, "unit": null, "market": null}}
+{{"action": "save_price", "commodity": "beans_brown", "price": 35000, "unit": null, "market": null}}
 ```
 
 2. PRICE QUERY - User asking for a price
@@ -155,7 +157,7 @@ Examples: "how much is rice?", "wetin be beans price?", "price of yellow garri"
 
 RULES:
 - Convert k to thousands: 35k = 35000
-- If user specifies variety (yellow garri, local rice, oloyin beans), use the full name (garri_yellow, rice_local, beans_oloyin)
+- If user specifies variety (yellow garri, local rice, brown beans), use the full name (garri_yellow, rice_local, beans_brown)
 - If user doesn't specify variety for garri/rice/beans, just use base name (garri, rice, beans) - system will ask
 - Standardize market names: Ogbete → ogbete_main
 - If user mentions buying/purchasing a commodity (e.g., "I bought garri", "I got rice"), return JSON with price: null
