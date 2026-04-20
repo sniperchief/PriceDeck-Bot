@@ -2260,7 +2260,7 @@ async def send_garri_prices(to: str, unit: str = "paint"):
         # Send buttons for cart and alternate unit
         if is_market_open():
             alternate_unit = "half_paint" if unit == "paint" else "paint"
-            alternate_label = "See Half Paint Prices" if unit == "paint" else "See Paint Prices"
+            alternate_label = "Half Paint Prices" if unit == "paint" else "See Paint Prices"
             await send_grain_cart_buttons(to, "garri", prices, unit, alternate_unit, alternate_label)
         else:
             await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily._")
@@ -2313,7 +2313,7 @@ async def send_beans_prices(to: str, unit: str = "paint"):
         # Send buttons for cart and alternate unit
         if is_market_open():
             alternate_unit = "half_paint" if unit == "paint" else "paint"
-            alternate_label = "See Half Paint Prices" if unit == "paint" else "See Paint Prices"
+            alternate_label = "Half Paint Prices" if unit == "paint" else "See Paint Prices"
             await send_grain_cart_buttons(to, "beans", prices, unit, alternate_unit, alternate_label)
         else:
             await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily._")
