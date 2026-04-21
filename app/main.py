@@ -91,6 +91,8 @@ COMMODITY_IMAGES = {
     "pepper": f"{COMMODITY_IMAGE_BASE_URL}/pepper.jpg",
     "onions": f"{COMMODITY_IMAGE_BASE_URL}/onions.jpg",
     "ugu_leaf": f"{COMMODITY_IMAGE_BASE_URL}/ugu_leaf.jpg",
+    "bitter_leaf": f"{COMMODITY_IMAGE_BASE_URL}/bitter_leaf.jpg",
+    "oha_leaf": f"{COMMODITY_IMAGE_BASE_URL}/oha_leaf.jpg",
     # Spices & Pasta
     "kitchen_glory": f"{COMMODITY_IMAGE_BASE_URL}/kitchen_glory.jpg",
     "gino_curry": f"{COMMODITY_IMAGE_BASE_URL}/gino_curry.jpg",
@@ -1755,7 +1757,7 @@ async def send_category_items(to: str, category: str, action: str):
 async def send_single_unit_price(to: str, commodity: str):
     """
     Show price for items with only one unit type.
-    Directly displays price and add to cart button.
+    Directly displays price with image and add to cart button.
 
     Args:
         to: Recipient's WhatsApp number
@@ -1793,14 +1795,35 @@ async def send_single_unit_price(to: str, commodity: str):
 
         price_display = format_price(ogbete_price)
 
-        # Send price message
-        message = f"*{commodity_display}* at Ogbete:\n\n{price_display} per {unit_display}"
-        await send_whatsapp_message(to, message)
+        # Get emoji based on category
+        category = get_commodity_category(commodity)
+        category_emojis = {
+            "vegetables": "🥬",
+            "proteins": "🍖",
+            "seafood": "🐟",
+            "oils": "🫒",
+            "spices_pasta": "🧂",
+            "grains": "🌾"
+        }
+        emoji = category_emojis.get(category, "📦")
+
+        # Build formatted message
+        message = f"{emoji} *{commodity_display} Price*\n\n₦{price_display} per {unit_display}\n\n_Prices from Ogbete Market_"
+
+        # Send image with prices if available
+        image_url = get_commodity_image(commodity)
+        if image_url:
+            await send_image_message(to, image_url, message)
+        else:
+            await send_whatsapp_message(to, message)
+
+        await asyncio.sleep(0.5)
 
         # Send add to cart button if market is open
         if ogbete_price and is_market_open():
             await send_add_to_cart_buttons(to, commodity, str(ogbete_price), unit)
         else:
+            await send_whatsapp_message(to, "_Shopping available 8am - 4pm daily._")
             await send_main_menu(to, welcome=False)
 
     except Exception as e:
