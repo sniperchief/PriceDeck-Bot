@@ -93,11 +93,19 @@ COMMODITY_IMAGES = {
     "ugu_leaf": f"{COMMODITY_IMAGE_BASE_URL}/ugu_leaf.jpg",
     "bitter_leaf": f"{COMMODITY_IMAGE_BASE_URL}/bitter_leaf.jpg",
     "oha_leaf": f"{COMMODITY_IMAGE_BASE_URL}/oha_leaf.jpg",
+    # oils
+    "palm_oil": f"{COMMODITY_IMAGE_BASE_URL}/palm_oil.jpg",
+    "kings_oil": f"{COMMODITY_IMAGE_BASE_URL}/kings_oil.jpg",
     # Spices & Pasta
     "kitchen_glory": f"{COMMODITY_IMAGE_BASE_URL}/kitchen_glory.jpg",
     "gino_curry": f"{COMMODITY_IMAGE_BASE_URL}/gino_curry.jpg",
     "gino_tomato": f"{COMMODITY_IMAGE_BASE_URL}/gino_tomato.jpg",
     "maggi_knorr": f"{COMMODITY_IMAGE_BASE_URL}/maggi_knorr.jpg",
+    "salt": f"{COMMODITY_IMAGE_BASE_URL}/salt.jpg",
+    "indomie": f"{COMMODITY_IMAGE_BASE_URL}/indomie.jpg",
+    "titus_sardine": f"{COMMODITY_IMAGE_BASE_URL}/titus_sardine.jpg",
+    "spaghetti": f"{COMMODITY_IMAGE_BASE_URL}/spaghetti.jpg",
+    
 }
 
 # =====================================================
