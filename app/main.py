@@ -74,9 +74,6 @@ COMMODITY_IMAGES = {
     "beans_brown": f"{COMMODITY_IMAGE_BASE_URL}/beans_brown.jpg",
     "beans_white": f"{COMMODITY_IMAGE_BASE_URL}/beans_white.jpg",
     "beans_iron": f"{COMMODITY_IMAGE_BASE_URL}/beans_brown.jpg",    # Use brown beans image
-    "egg": f"{COMMODITY_IMAGE_BASE_URL}/egg.jpg",
-    "beef": f"{COMMODITY_IMAGE_BASE_URL}/beef.jpg",
-    "goat_meat": f"{COMMODITY_IMAGE_BASE_URL}/goat_meat.jpg",
     "rice": f"{COMMODITY_IMAGE_BASE_URL}/rice.jpg",
     "rice_local": f"{COMMODITY_IMAGE_BASE_URL}/rice.jpg",
     "rice_foreign": f"{COMMODITY_IMAGE_BASE_URL}/rice.jpg",
@@ -84,8 +81,16 @@ COMMODITY_IMAGES = {
     "garri_yellow": f"{COMMODITY_IMAGE_BASE_URL}/garri_yellow.jpg",
     # Proteins
     "chicken": f"{COMMODITY_IMAGE_BASE_URL}/chicken.jpg",
+    "egg": f"{COMMODITY_IMAGE_BASE_URL}/egg.jpg",
+    "beef": f"{COMMODITY_IMAGE_BASE_URL}/beef.jpg",
+    "goat_meat": f"{COMMODITY_IMAGE_BASE_URL}/goat_meat.jpg",
     # Seafood
     "frozen_fish": f"{COMMODITY_IMAGE_BASE_URL}/frozen_fish.jpg",
+    "dry_fish": f"{COMMODITY_IMAGE_BASE_URL}/dry_fish.jpg",
+    "stockfish": f"{COMMODITY_IMAGE_BASE_URL}/stockfish.jpg",
+    "smoked_fish": f"{COMMODITY_IMAGE_BASE_URL}/smoked_fish.jpg",
+    "crayfish": f"{COMMODITY_IMAGE_BASE_URL}/crayfish.jpg",
+
     # Vegetables
     "tomatoes": f"{COMMODITY_IMAGE_BASE_URL}/tomatoes.jpg",
     "pepper": f"{COMMODITY_IMAGE_BASE_URL}/pepper.jpg",
