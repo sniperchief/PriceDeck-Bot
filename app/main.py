@@ -97,6 +97,7 @@ COMMODITY_IMAGES = {
     "kitchen_glory": f"{COMMODITY_IMAGE_BASE_URL}/kitchen_glory.jpg",
     "gino_curry": f"{COMMODITY_IMAGE_BASE_URL}/gino_curry.jpg",
     "gino_tomato": f"{COMMODITY_IMAGE_BASE_URL}/gino_tomato.jpg",
+    "maggi_knorr": f"{COMMODITY_IMAGE_BASE_URL}/maggi_knorr.jpg",
 }
 
 # =====================================================
